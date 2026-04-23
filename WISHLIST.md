@@ -2,12 +2,12 @@
 
 A list of capabilities worth adding in the future (no fixed order and no deadlines).
 
-- Conversation context memory (short-term per chat).
-- Session commands: `/new`, `/reset`.
+- Longer and smarter conversation memory policies.
+- Session commands: `/new`, `/reset` (explicit user controls).
 - Better logging and debugging (`audit`, errors, metrics).
-- ~~A dedicated `mcp-jarvis1net` server.~~ (osobne repozytorium `mcp-jarvis1net`)
+- ~~A dedicated `mcp-jarvis1net` server.~~ (done in separate repository)
 - Tool registry (name, description, input schema).
-- `outlook` integration as an MCP tool.
+- Complete `outlook` integration as an MCP tool (currently stub status endpoint).
 - Approval gate before high-risk actions.
 - Basic user roles and permissions.
 - Document import into knowledge storage (RAG in a later stage).

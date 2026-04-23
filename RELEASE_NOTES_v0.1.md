@@ -10,12 +10,14 @@
 - Single-model flow configured via `MODEL`.
 - CLI interface (`src/main.py`) and Telegram interface (`src/telegram_bot.py`).
 - Audit logging to JSONL (`AUDIT_LOG_PATH`) for basic traceability.
+- Short session memory (per CLI session and per Telegram chat).
+- Optional MCP HTTP integration (filesystem tools) via `MCP_SERVER_URL` + `MCP_API_KEY`.
 
 ## Scope
 
-- No MCP integrations.
-- No tool execution.
-- No long-term conversation memory.
+- MCP is optional and only used when API key configuration is present.
+- Filesystem tool execution is available through the hosted MCP service.
+- Session memory is short-term only (not long-term knowledge storage).
 
 ## Security
 
@@ -24,4 +26,4 @@
 
 ## Notes
 
-This version focuses on simplicity and clean project structure before adding advanced features.
+Version remains **0.1** and focuses on a stable MVP baseline (CLI + Telegram + optional hosted MCP).
