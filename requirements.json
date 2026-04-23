@@ -1,0 +1,7 @@
+{
+  "python_dependencies": [
+    "python-dotenv",
+    "openai",
+    "requests"
+  ]
+}

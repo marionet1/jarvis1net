@@ -1,0 +1,174 @@
+from __future__ import annotations
+
+import json
+from typing import Any, Callable
+
+from openai import OpenAI
+
+from .mcp_fs_tools import FILESYSTEM_TOOLS, run_filesystem_tool
+from .session_context import get_session_store
+from .types import AgentConfig
+
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+
+FS_AGENT_SYSTEM = """You are the jarvis1net assistant with access to fs_* tools. These tools operate on **files and directories on the server** (MCP), only within allowed paths configured by the operator.
+
+Rules:
+- Use previous turns from this session as conversation context.
+- When the user asks for server-side file operations (list/read/write/create/delete/rename), **use tools** instead of guessing filesystem content.
+- Start with `fs_list_directory` or `fs_stat_path` when path structure is uncertain, then use `fs_read_file` / `fs_write_file` / others.
+- Use `create_parents: true` when writing into a directory tree that may not exist yet.
+- After tool calls, summarize clearly what was done, which paths were used, and any HTTP/tool errors.
+- Do not claim an operation was performed unless you actually executed the appropriate tool.
+"""
+
+
+def normalize_model_name(model: str) -> str:
+    if "/" not in model:
+        return f"openai/{model}"
+    return model
+
+
+def _simple_responses_reply(user_input: str, model: str, config: AgentConfig) -> str:
+    client = OpenAI(
+        api_key=config.openrouter_api_key,
+        base_url=OPENROUTER_BASE_URL,
+    )
+    try:
+        response = client.responses.create(
+            model=normalize_model_name(model),
+            input=user_input,
+            max_output_tokens=220,
+        )
+        text = response.output_text.strip()
+    except Exception as exc:
+        return (
+            "Model did not return a response (for example, token/credit limits). "
+            f"Details: {exc}"
+        )
+    if not text:
+        return (
+            "The intent is unclear. Please specify the goal, for example a file path or directory."
+        )
+    return text
+
+
+def _format_mcp_tool_round(tool_calls: Any) -> str:
+    """Text shown to the user before executing an MCP tool round."""
+    lines = ["Using mcp-jarvis1net"]
+    for tc in tool_calls:
+        name = tc.function.name
+        raw = (tc.function.arguments or "").strip() or "{}"
+        if len(raw) > 1200:
+            raw = raw[:1200] + "…"
+        lines.append(f"  → {name}")
+        lines.append(f"     {raw}")
+    return "\n".join(lines)
+
+
+def _chat_tool_loop(
+    user_input: str,
+    model: str,
+    config: AgentConfig,
+    *,
+    prior_messages: list[dict[str, str]],
+    before_tool_round: Callable[[str], None] | None = None,
+) -> str:
+    client = OpenAI(
+        api_key=config.openrouter_api_key,
+        base_url=OPENROUTER_BASE_URL,
+    )
+    model_id = normalize_model_name(model)
+    messages: list[dict[str, Any]] = [
+        {"role": "system", "content": FS_AGENT_SYSTEM},
+        *prior_messages,
+        {"role": "user", "content": user_input},
+    ]
+    max_rounds = config.mcp_max_tool_rounds
+
+    for _ in range(max_rounds):
+        try:
+            completion = client.chat.completions.create(
+                model=model_id,
+                messages=messages,
+                tools=FILESYSTEM_TOOLS,
+                tool_choice="auto",
+                max_tokens=4096,
+            )
+        except Exception as exc:
+            return f"Model call error (chat + tools): {exc}"
+
+        choice = completion.choices[0]
+        msg = choice.message
+
+        if choice.finish_reason == "tool_calls" and msg.tool_calls:
+            if before_tool_round is not None:
+                try:
+                    before_tool_round(_format_mcp_tool_round(msg.tool_calls))
+                except Exception:
+                    pass
+            assistant_payload: dict[str, Any] = {
+                "role": "assistant",
+                "content": msg.content,
+                "tool_calls": [
+                    {
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {"name": tc.function.name, "arguments": tc.function.arguments or "{}"},
+                    }
+                    for tc in msg.tool_calls
+                ],
+            }
+            messages.append(assistant_payload)
+
+            for tc in msg.tool_calls:
+                try:
+                    args = json.loads(tc.function.arguments or "{}")
+                except json.JSONDecodeError:
+                    args = {}
+                result = run_filesystem_tool(tc.function.name, args, config)
+                messages.append({"role": "tool", "tool_call_id": tc.id, "content": result})
+            continue
+
+        text = (msg.content or "").strip()
+        if text:
+            return text
+        return "Model finished without text output. Please clarify the request."
+
+    return (
+        f"Tool round limit exceeded ({max_rounds}). "
+        "Split the request into smaller steps or narrow down paths."
+    )
+
+
+def get_llm_reply(
+    user_input: str,
+    model: str,
+    config: AgentConfig,
+    *,
+    session_key: str = "default",
+    before_tool_round: Callable[[str], None] | None = None,
+) -> str:
+    if not config.openrouter_api_key.strip():
+        return (
+            "Missing OPENROUTER_API_KEY in .env. Add it to enable OpenRouter responses."
+        )
+
+    if config.mcp_api_key.strip():
+        store = get_session_store(config.session_context_path)
+        state = store.session(session_key)
+        prior = state.chat.as_openai_messages()
+        try:
+            reply = _chat_tool_loop(
+                user_input,
+                model,
+                config,
+                prior_messages=prior,
+                before_tool_round=before_tool_round,
+            )
+            state.chat.append_turn(user_input, reply)
+            return reply
+        finally:
+            store.save()
+
+    return _simple_responses_reply(user_input, model, config)
