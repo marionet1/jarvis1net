@@ -21,6 +21,20 @@ def _scopes(config: AgentConfig) -> list[str]:
     return list(config.microsoft_graph_scopes)
 
 
+# Device code + silent flows reject these in the scopes argument (MSAL / STS reserved).
+_MSAL_SCOPE_BLOCKLIST = frozenset(s.casefold() for s in ("offline_access", "openid", "profile"))
+
+
+def _msal_request_scopes(config: AgentConfig) -> list[str]:
+    out = [s.strip() for s in _scopes(config) if s.strip() and s.strip().casefold() not in _MSAL_SCOPE_BLOCKLIST]
+    if not out:
+        raise RuntimeError(
+            "Brak scope Graph po odfiltrowaniu zarezerwowanych (offline_access/openid/profile). "
+            "Ustaw np. User.Read Mail.Read w /microsoft-set-scopes lub MICROSOFT_GRAPH_SCOPES."
+        )
+    return out
+
+
 def _cache_path(config: AgentConfig) -> Path:
     return Path(config.microsoft_token_cache_path).expanduser().resolve()
 
@@ -61,7 +75,7 @@ def get_graph_access_token_silent(config: AgentConfig) -> str | None:
     if not accounts:
         _persist_cache(cache, config)
         return None
-    result = app.acquire_token_silent(_scopes(config), account=accounts[0])
+    result = app.acquire_token_silent(_msal_request_scopes(config), account=accounts[0])
     _persist_cache(cache, config)
     if result and "access_token" in result:
         return str(result["access_token"])
@@ -84,7 +98,7 @@ def run_device_code_login(config: AgentConfig, notify: Callable[[str], None]) ->
     Returns a short Polish summary for the user.
     """
     app, cache = _public_app(config)
-    flow = app.initiate_device_flow(scopes=_scopes(config))
+    flow = app.initiate_device_flow(scopes=_msal_request_scopes(config))
     if "user_code" not in flow:
         err = flow.get("error_description") or flow.get("error") or json.dumps(flow)
         raise RuntimeError(f"Nie udało się uruchomić logowania: {err}")

@@ -64,7 +64,7 @@ def main() -> None:
             parts = stripped.split(None, 1)
             if len(parts) < 2 or not parts[1].strip():
                 print(" ".join(config.microsoft_graph_scopes))
-                print("Użycie: /microsoft-set-scopes offline_access User.Read …\n")
+                print("Użycie: /microsoft-set-scopes User.Read Mail.Read …\n")
                 continue
             scope_list = [s.strip() for s in parts[1].replace(",", " ").split() if s.strip()]
             if not scope_list:

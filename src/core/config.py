@@ -6,7 +6,8 @@ from dotenv import load_dotenv
 from .microsoft_runtime_settings import read_settings
 from .types import AgentConfig
 
-_DEFAULT_MS_SCOPES = "offline_access User.Read Mail.Read Calendars.Read Files.Read.All"
+# Do not include offline_access/openid/profile here — MSAL device flow rejects them as reserved.
+_DEFAULT_MS_SCOPES = "User.Read Mail.Read Calendars.Read Files.Read.All"
 
 
 def load_config() -> AgentConfig:

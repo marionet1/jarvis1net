@@ -109,7 +109,7 @@ def process_message(
         if len(parts) < 2 or not parts[1].strip():
             scopes_txt = " ".join(config.microsoft_graph_scopes)
             return [
-                "Użycie: /microsoft-set-scopes offline_access User.Read Mail.Read …\n"
+                "Użycie: /microsoft-set-scopes User.Read Mail.Read …\n"
                 f"Aktualnie (efektywnie): {scopes_txt}"
             ]
         raw_scopes = parts[1].strip()
