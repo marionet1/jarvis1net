@@ -87,9 +87,10 @@ def process_message(
             "jarvis1net — chat naturally and ask for file operations, directory listings, MCP health checks, and more.\n"
             "The bot keeps short chat memory for this conversation. To clear it, send: 'clear history'.\n"
             "When MCP tools are used, you will first receive a short 'Using mcp-jarvis1net' message with tool name and arguments.\n"
-            "Microsoft (Graph): /microsoft-set-client <Client-ID> [tenant], potem /microsoft-login; "
-            "albo token z PC: az account get-access-token --resource https://graph.microsoft.com -o tsv → /microsoft-set-graph-token <token>. "
-            "Szczegóły: /microsoft-show-settings."
+            "Microsoft (Graph): /microsoft-set-client <Client-ID> [tenant], potem /microsoft-login. "
+            "Konto osobiste (@outlook itd.): tenant **consumers** + w Azure redirect …/consumers/oauth2/nativeclient. "
+            "Szybka zmiana tenantu: /microsoft-set-tenant consumers | organizations | common. "
+            "Token z PC: /microsoft-set-graph-token. Szczegóły: /microsoft-show-settings."
         ]
 
     if command_base == "/microsoft-set-client":
@@ -108,6 +109,24 @@ def process_message(
         return [
             f"Zapisano Client ID (tenant: {tenant}). Następnie wyślij /microsoft-login — bez restartu bota."
         ]
+
+    if command_base == "/microsoft-set-tenant":
+        parts = stripped.split()
+        if len(parts) < 2:
+            return [
+                "Użycie: /microsoft-set-tenant <consumers|organizations|common|GUID-katalogu>\n"
+                "— consumers: konto osobiste Microsoft (redirect w Azure: …/consumers/oauth2/nativeclient).\n"
+                "— organizations: konto służbowe (redirect …/organizations/…).\n"
+                "— common: MSA + organizacje (redirect …/common/…; bywa kapryśne).\n"
+                "Potem /microsoft-logout i /microsoft-login."
+            ]
+        raw = parts[1].strip()
+        t = raw.casefold()
+        ok = t in ("common", "organizations", "consumers") or validate_client_id(raw)
+        if not ok:
+            return ["Nieznany tenant — użyj consumers, organizations, common albo GUID katalogu z Azure."]
+        save_merged_settings(config.audit_log_path, {"tenant_id": raw})
+        return [f"Zapisano tenant: {raw}. Następnie /microsoft-logout → /microsoft-login (redirect w Azure musi pasować do tego segmentu)."]
 
     if command_base in {"/microsoft-set-scopes", "/microsoft-scopes"}:
         parts = stripped.split(None, 1)
@@ -132,6 +151,14 @@ def process_message(
         src = "MICROSOFT_CLIENT_ID w .env" if cid_env else ("microsoft_agent_settings.json (czat/CLI)" if rt.get("client_id") else "brak")
         has_cache = Path(config.microsoft_token_cache_path).expanduser().exists()
         cid_show = config.microsoft_client_id or "(brak)"
+        ten_env = os.getenv("MICROSOFT_TENANT_ID", "").strip()
+        ten_rt = str(rt.get("tenant_id") or "").strip()
+        if ten_rt:
+            ten_src = "microsoft_agent_settings.json (nadpisuje .env)"
+        elif ten_env:
+            ten_src = "MICROSOFT_TENANT_ID w .env"
+        else:
+            ten_src = "domyślnie organizations (brak pliku i env)"
         tok_env = bool(os.getenv("MICROSOFT_GRAPH_ACCESS_TOKEN", "").strip())
         tok_rt = bool(
             isinstance(rt.get("graph_access_token"), str) and str(rt.get("graph_access_token")).strip()
@@ -148,15 +175,15 @@ def process_message(
             "Microsoft — konfiguracja agenta:",
             f"- Client ID: {cid_show}",
             f"- Źródło Client ID: {src}",
-            f"- Tenant: {config.microsoft_tenant_id}",
+            f"- Tenant: {config.microsoft_tenant_id} (źródło: {ten_src})",
             f"- Scope: {' '.join(config.microsoft_graph_scopes)}",
             f"- Token Graph (nagłówek do MCP): {tok_src}",
             "- W Azure (Mobile/desktop) zarejestruj dokładnie TEN redirect (jeden wpis, zgodny z tenantem):",
             redir_lines,
             f"- Plik ustawień: {settings_path(config.audit_log_path)}",
             f"- Cache tokenów MSAL: {'tak' if has_cache else 'nie'}",
-            "Komendy: /microsoft-set-client …, /microsoft-set-scopes …, /microsoft-login, /microsoft-set-graph-token …, "
-            "/microsoft-logout, /microsoft-clear-runtime",
+            "Komendy: /microsoft-set-client …, /microsoft-set-tenant …, /microsoft-set-scopes …, /microsoft-login, "
+            "/microsoft-set-graph-token …, /microsoft-logout, /microsoft-clear-runtime",
         ]
         return ["\n".join(lines)]
 

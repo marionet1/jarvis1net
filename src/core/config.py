@@ -48,11 +48,16 @@ def load_config() -> AgentConfig:
 
     ms_client = os.getenv("MICROSOFT_CLIENT_ID", "").strip() or str(rt.get("client_id") or "").strip()
 
+    # Tenant z pliku runtime (Telegram /microsoft-set-client) ma pierwszeństwo przed .env —
+    # inaczej MICROSOFT_TENANT_ID=organizations na VPS blokuje np. /microsoft-set-client … consumers (konto osobiste).
     ms_tenant_env = os.getenv("MICROSOFT_TENANT_ID", "").strip()
-    if ms_tenant_env:
+    rt_tenant = str(rt.get("tenant_id") or "").strip()
+    if rt_tenant:
+        ms_tenant = rt_tenant
+    elif ms_tenant_env:
         ms_tenant = ms_tenant_env
     else:
-        ms_tenant = str(rt.get("tenant_id") or "organizations").strip() or "organizations"
+        ms_tenant = "organizations"
 
     scopes_env = os.getenv("MICROSOFT_GRAPH_SCOPES", "").strip()
     if scopes_env:

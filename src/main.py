@@ -60,6 +60,23 @@ def main() -> None:
             print(f"Zapisano (tenant: {tenant}). Teraz /microsoft-login\n")
             continue
 
+        if cmd == "/microsoft-set-tenant":
+            parts = stripped.split()
+            if len(parts) < 2:
+                print(
+                    "Użycie: /microsoft-set-tenant <consumers|organizations|common|GUID>\n"
+                )
+                continue
+            raw = parts[1].strip()
+            t = raw.casefold()
+            ok = t in ("common", "organizations", "consumers") or validate_client_id(raw)
+            if not ok:
+                print("Nieznany tenant.\n")
+                continue
+            save_merged_settings(config.audit_log_path, {"tenant_id": raw})
+            print(f"Zapisano tenant: {raw}\n")
+            continue
+
         if cmd in {"/microsoft-set-scopes", "/microsoft-scopes"}:
             parts = stripped.split(None, 1)
             if len(parts) < 2 or not parts[1].strip():
@@ -79,6 +96,14 @@ def main() -> None:
             cid_env = os.getenv("MICROSOFT_CLIENT_ID", "").strip()
             src = "env" if cid_env else ("plik" if rt.get("client_id") else "brak")
             has_cache = Path(config.microsoft_token_cache_path).expanduser().exists()
+            ten_env = os.getenv("MICROSOFT_TENANT_ID", "").strip()
+            ten_rt = str(rt.get("tenant_id") or "").strip()
+            if ten_rt:
+                ten_src = "plik (nadpisuje .env)"
+            elif ten_env:
+                ten_src = "env"
+            else:
+                ten_src = "domyślnie organizations"
             tok_env = bool(os.getenv("MICROSOFT_GRAPH_ACCESS_TOKEN", "").strip())
             tok_rt = bool(
                 isinstance(rt.get("graph_access_token"), str) and str(rt.get("graph_access_token")).strip()
@@ -90,7 +115,7 @@ def main() -> None:
             else:
                 tok_src = "MSAL po /microsoft-login"
             print(f"Client ID: {config.microsoft_client_id or '(brak)'} (źródło: {src})")
-            print(f"Tenant: {config.microsoft_tenant_id}")
+            print(f"Tenant: {config.microsoft_tenant_id} (źródło: {ten_src})")
             print(f"Scopes: {' '.join(config.microsoft_graph_scopes)}")
             print(f"Token Graph: {tok_src}")
             print(f"Ustawienia: {settings_path(config.audit_log_path)}")
