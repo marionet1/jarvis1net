@@ -567,7 +567,11 @@ def get_llm_reply(
 ) -> str:
     if not config.openrouter_api_key.strip():
         return (
-            "Missing OPENROUTER_API_KEY in .env. Add it to enable OpenRouter responses."
+            "Brak klucza OpenRouter. Ustaw go **trwale** jednym z sposobów:\n"
+            "• W Telegramie: **/jarvis-set-openrouter-key** `sk-or-v1-...` (klucz z https://openrouter.ai/keys ) — "
+            "zapisuje się na serwerze (w Dockerze w wolumenie /app/data, przetrwa restart).\n"
+            "• Albo w pliku **.env** na hoście: `OPENROUTER_API_KEY=...` i restart kontenera.\n"
+            "Potem napisz ponownie. **/jarvis-config-check** — podgląd konfiguracji."
         )
 
     if mcp_can_use_tools(config):

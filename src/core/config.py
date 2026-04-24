@@ -259,7 +259,10 @@ def run_startup_checks(config: AgentConfig) -> StartupCheckResult:
 
     if not config.openrouter_api_key.strip():
         blocking.append(
-            "OPENROUTER_API_KEY missing. In chat: /jarvis-set-openrouter-key <key> (saved next to logs; channel leak risk)."
+            "OpenRouter API key missing (each deployment uses its own). "
+            "In Telegram: /jarvis-set-openrouter-key <key> — key is saved in jarvis_runtime_secrets.json "
+            "next to other data (Docker: under /app/data, persists after restart). "
+            "Or set OPENROUTER_API_KEY in .env on the server. Chat channel = leak risk if others read the chat."
         )
 
     if not config.telegram_allowed_chat_ids:
@@ -297,10 +300,10 @@ def format_startup_report_plain(result: StartupCheckResult, *, title: str = "jar
         lines.append(f"- {w}")
     lines.append("")
     lines.append(
-        "From chat (know the risk): /jarvis-set-openrouter-key …; "
-        "MCP: stdio via env (Docker/README) or HTTP with /jarvis-set-mcp-key; "
+        "First: /jarvis-set-openrouter-key <key from https://openrouter.ai/keys> (saved on disk, survives restarts). "
+        "Then MCP: stdio via env (Docker/README) or HTTP with /jarvis-set-mcp-key; "
         "Microsoft: /microsoft-set-client + /microsoft-login or /microsoft-set-graph-token. "
-        "Clear: /jarvis-config-reset."
+        "Clear saved keys: /jarvis-config-reset."
     )
     return "\n".join(lines)
 

@@ -83,9 +83,20 @@ def run_telegram_startup_hooks(
             "or message the bot once (session is saved), then the next restart will send startup text to a known chat_id."
         )
         return
+    startup_body = config.telegram_startup_message
+    if not config.openrouter_api_key.strip():
+        startup_body = (
+            f"{config.telegram_startup_message}\n\n"
+            "—\n"
+            "FIRST SETUP — OpenRouter API key: not set. Each instance uses its own key.\n"
+            "Send (one line): /jarvis-set-openrouter-key <key from https://openrouter.ai/keys >\n"
+            "Saved on the server in jarvis_runtime_secrets.json (with other data; Docker: /app/data — "
+            "survives /restart). Then chat normally. /jarvis-config-check — status."
+        )
+
     for cid_s in notify_targets:
         try:
-            send_message(config.telegram_bot_token, int(cid_s), config.telegram_startup_message)
+            send_message(config.telegram_bot_token, int(cid_s), startup_body)
         except Exception as exc:
             print(f"jarvis1net: startup message to chat_id={cid_s} failed: {exc}")
 
@@ -353,21 +364,27 @@ def process_message(
         ]
 
     if command_base in {"/start", "/help"}:
+        or_key_ok = bool(config.openrouter_api_key.strip())
+        setup_openrouter = (
+            "OpenRouter: skonfigurowany (OK).\n\n"
+            if or_key_ok
+            else (
+                "1) OpenRouter (wymagany) — własny klucz: https://openrouter.ai/keys\n"
+                "   Jedna linijka: /jarvis-set-openrouter-key sk-or-v1-…\n"
+                "   Trwały zapis w katalogu danych (Docker: /app/data, przetrwa restart). "
+                "Lub OPENROUTER_API_KEY w pliku .env na serwerze.\n\n"
+            )
+        )
         return [
-            "jarvis1net — chat naturally and ask for file operations, directory listings, MCP health checks, and more.\n"
-            "The bot keeps short chat memory for this conversation. To clear it, send: 'clear history'.\n"
-            "After a bot process restart, chat memory may be cleared automatically and you may get a short notice "
-            "(default on — see TELEGRAM_NOTIFY_ON_START / TELEGRAM_CLEAR_SESSION_ON_START in .env).\n"
-            "When MCP tools are used, you will first receive a short 'Using mcp-jarvis1net' message with tool name and arguments.\n"
-            "Microsoft (Graph): /microsoft-set-client <Client-ID> [tenant], then /microsoft-login. "
-            "Personal Microsoft account (@outlook etc.): tenant **consumers** + in Azure redirect …/consumers/oauth2/nativeclient. "
-            "Quick tenant change: /microsoft-set-tenant consumers | organizations | common. "
-            "Token from PC: /microsoft-set-graph-token. Details: /microsoft-show-settings.\n"
-            "MCP limits (tool rounds / JSON truncation): /jarvis-limits\n"
-            "Keys from chat (leak risk): **/jarvis-set-openrouter-key** …, **/jarvis-set-mcp-key** …. "
-            "Check: **/jarvis-config-check**. Reset saved bot data: **/jarvis-config-reset** (same guard as /restart).\n"
-            "Restart the bot (TELEGRAM_ALLOWED_CHAT_IDS only): **/restart** or e.g. “restart bot”.\n"
-            "Full command list + MCP tools (HTML): **/info**"
+            "jarvis1net — asystent (OpenRouter + opcjonalnie Microsoft / MCP).\n\n"
+            + setup_openrouter
+            + "2) Dalej: pisz naturalnie (pliki, katalogi, po zalogowaniu: mail/kalendarz).\n"
+            "Pamięć: krótka, per czat. Wyczyść: clear history. Po restarcie bota może być wyczyszczona (TELEGRAM_CLEAR_SESSION_ON_START w .env).\n\n"
+            "Microsoft: /microsoft-set-client … → /microsoft-login. Konto pryw.: consumers + redirect …/consumers/… w Azure. "
+            "/microsoft-show-settings — podsumowanie.\n"
+            "/jarvis-limits — limity MCP. /jarvis-config-check — status. /info — pełna lista.\n"
+            "/jarvis-config-reset — czyści zapisane w czacie sekrety (wymagana lista TELEGRAM_ALLOWED_CHAT_IDS). "
+            "/jarvis-set-mcp-key tylko gdy MCP_MODE=http. /restart — restart procesu."
         ]
 
     if command_base in {"/info", "/jarvis-info"}:
@@ -388,8 +405,9 @@ def process_message(
             return ["Key looks too short."]
         save_merged_jarvis_runtime(config.audit_log_path, {"openrouter_api_key": key})
         return [
-            "Saved OpenRouter key to jarvis_runtime_secrets.json (next to logs). "
-            "It applies from the next message (no restart). /jarvis-config-check — preview."
+            "Zapisano klucz OpenRouter w jarvis_runtime_secrets.json (katalog danych agenta; w Dockerze: /app/data — "
+            "przetrwa restart kontenera). Obowiązuje od następnej wiadomości (bez restartu bota). "
+            "/jarvis-config-check — podgląd stanu."
         ]
 
     if command_base == "/jarvis-set-mcp-key":
