@@ -1,4 +1,5 @@
 import os
+import subprocess
 import threading
 import time
 from pathlib import Path
@@ -83,6 +84,41 @@ _CLEAR_HISTORY_PHRASES = frozenset(
     }
 )
 
+# Dokładna treść wiadomości (bez slash) — unikamy przypadkowego „restart” w zdaniu.
+_RESTART_BOT_PHRASES = frozenset(
+    {
+        "restart bota",
+        "restartuj bota",
+        "zrestartuj bota",
+        "restart jarvis",
+        "restart jarvis1net",
+    }
+)
+
+
+def _restart_from_chat_allowed(config: AgentConfig, chat_id_s: str) -> bool:
+    return bool(config.telegram_allowed_chat_ids) and chat_id_s in config.telegram_allowed_chat_ids
+
+
+def _schedule_telegram_self_restart() -> None:
+    """Opóźniony restart usługi user systemd (żeby zdążyć wysłać odpowiedź na Telegram)."""
+
+    def worker() -> None:
+        time.sleep(1.5)
+        try:
+            subprocess.run(
+                ["systemctl", "--user", "restart", "jarvis1net-telegram.service"],
+                check=False,
+                timeout=120,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except Exception as exc:
+            print(f"jarvis1net: self-restart (systemctl) failed: {exc}")
+
+    threading.Thread(target=worker, daemon=True).start()
+
 
 def _chunk_text(text: str, limit: int = 3900) -> list[str]:
     if len(text) <= limit:
@@ -129,6 +165,21 @@ def process_message(
     stripped = line.strip()
     lower = stripped.lower()
     command_base = lower.split()[0].split("@", 1)[0] if lower else ""
+    chat_id_s = str(chat_id)
+
+    if command_base in {"/restart", "/jarvis-restart"} or lower in _RESTART_BOT_PHRASES:
+        if not _restart_from_chat_allowed(config, chat_id_s):
+            if not config.telegram_allowed_chat_ids:
+                return [
+                    "Restart z czatu jest możliwy tylko gdy w .env ustawisz TELEGRAM_ALLOWED_CHAT_IDS "
+                    "(wtedy tylko te czaty mogą wysłać /restart)."
+                ]
+            return ["Brak uprawnień do restartu z tego czatu."]
+        _schedule_telegram_self_restart()
+        return [
+            "OK — za ok. 2 s restartuję proces bota (jarvis1net-telegram). "
+            "Za chwilę powinieneś dostać wiadomość po starcie (jeśli TELEGRAM_NOTIFY_ON_START=1)."
+        ]
 
     if command_base in {"/start", "/help"}:
         return [
@@ -141,7 +192,8 @@ def process_message(
             "Konto osobiste (@outlook itd.): tenant **consumers** + w Azure redirect …/consumers/oauth2/nativeclient. "
             "Szybka zmiana tenantu: /microsoft-set-tenant consumers | organizations | common. "
             "Token z PC: /microsoft-set-graph-token. Szczegóły: /microsoft-show-settings.\n"
-            "Limit MCP (rundy narzędzi / obcięcie JSON): /jarvis-limits"
+            "Limit MCP (rundy narzędzi / obcięcie JSON): /jarvis-limits\n"
+            "Restart procesu bota (tylko czaty z TELEGRAM_ALLOWED_CHAT_IDS): **/restart** albo napisz np. „restart bota”."
         ]
 
     if command_base in {"/jarvis-limits", "/mcp-limits", "/limits"}:
