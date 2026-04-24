@@ -24,6 +24,7 @@ Rules:
 - Do not claim an operation was performed unless you actually executed the appropriate tool.
 - For Microsoft mailbox/calendar/OneDrive (`microsoft_*` tools), if tools report missing Graph token, tell the user to run **/microsoft-set-client** (paste Azure Client ID) then **/microsoft-login** in Telegram, or set env vars on the agent host.
 - For mail/calendar/OneDrive **create, update, delete, send**, prefer **`microsoft_graph_api`** with the correct Graph `path` and `method` (see Microsoft Graph REST docs); helper tools only cover simple reads/lists.
+- For **bulk** Graph reads (many folders/messages), use small ``$top`` (e.g. 25–50), ``$select`` with only needed fields, and iterate in steps — each tool JSON is **truncated** if too large, so prefer narrow queries over one giant response.
 """
 
 
@@ -99,6 +100,19 @@ def _simple_responses_reply(user_input: str, model: str, config: AgentConfig) ->
             "The intent is unclear. Please specify the goal, for example a file path or directory."
         )
     return text
+
+
+def _truncate_tool_result_for_context(text: str, max_chars: int) -> str:
+    """Ogranicza JSON z MCP/Graph w kontekście modelu (jedna odpowiedź = jedna wiadomość tool)."""
+    text = text.strip()
+    if max_chars <= 0 or len(text) <= max_chars:
+        return text
+    note = (
+        f"\n\n[_jarvis1net: obcięto wynik narzędzia do {max_chars} znaków (było {len(text)}). "
+        "Użyj mniejszego $top i węższego $select w zapytaniach Graph.]"
+    )
+    head = max(500, max_chars - len(note))
+    return text[:head] + note
 
 
 def _format_mcp_tool_round(tool_calls: Any) -> str:
@@ -189,7 +203,8 @@ def _chat_tool_loop(
                 except json.JSONDecodeError:
                     args = {}
                 result = run_mcp_tool(tc.function.name, args, config)
-                messages.append({"role": "tool", "tool_call_id": tc.id, "content": result})
+                clipped = _truncate_tool_result_for_context(result, config.mcp_tool_result_max_chars)
+                messages.append({"role": "tool", "tool_call_id": tc.id, "content": clipped})
             continue
 
         text = (msg.content or "").strip()

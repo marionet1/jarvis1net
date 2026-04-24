@@ -19,6 +19,7 @@ DEFAULTS: list[tuple[str, str]] = [
     ("MICROSOFT_TOKEN_CACHE_PATH", ""),
     ("MCP_TIMEOUT_SEC", "15"),
     ("MCP_MAX_TOOL_ROUNDS", "10"),
+    ("MCP_TOOL_RESULT_MAX_CHARS", "12000"),
     ("SESSION_CONTEXT_PATH", ""),
 ]
 

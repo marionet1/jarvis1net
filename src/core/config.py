@@ -31,6 +31,11 @@ def load_config() -> AgentConfig:
         mcp_max_tool_rounds = max(1, min(32, int(mcp_tool_rounds_raw)))
     except ValueError:
         mcp_max_tool_rounds = 10
+    mcp_tool_cap_raw = os.getenv("MCP_TOOL_RESULT_MAX_CHARS", "12000").strip()
+    try:
+        mcp_tool_result_max_chars = max(2000, min(120_000, int(mcp_tool_cap_raw)))
+    except ValueError:
+        mcp_tool_result_max_chars = 12_000
 
     audit_log_path = os.getenv("AUDIT_LOG_PATH", "/home/jump/jarvis1net/logs/audit.jsonl")
     session_ctx_env = os.getenv("SESSION_CONTEXT_PATH", "").strip()
@@ -87,6 +92,7 @@ def load_config() -> AgentConfig:
         mcp_api_key=os.getenv("MCP_API_KEY", "").strip(),
         mcp_timeout_sec=mcp_timeout,
         mcp_max_tool_rounds=mcp_max_tool_rounds,
+        mcp_tool_result_max_chars=mcp_tool_result_max_chars,
         session_context_path=session_context_path,
         microsoft_graph_access_token=graph_token,
         microsoft_client_id=ms_client,

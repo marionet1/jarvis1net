@@ -13,6 +13,7 @@ class AgentConfig:
     mcp_api_key: str
     mcp_timeout_sec: int
     mcp_max_tool_rounds: int
+    mcp_tool_result_max_chars: int
     session_context_path: str
     microsoft_graph_access_token: str
     microsoft_client_id: str
