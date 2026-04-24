@@ -122,6 +122,17 @@ Ideas worth adding later (no fixed order or deadlines).
 - Better VPS deployment guide.
 - Change tracking (`CHANGELOG` / release notes).
 
+### Automation (planned)
+
+Goal: extend **mcp-jarvis1net** (or the agent host) with tools so the assistant can:
+
+1. **Schedule work** — e.g. manage **user-level cron** entries or **systemd user timers** for recurring jobs (with strict allowlists: which commands, which script paths, no root cron).
+2. **Author scripts** — e.g. write **Python** (or shell) files under **allowed roots only**, same pattern as today’s filesystem tools.
+
+**Example you have in mind:** *“Write a script that fetches the latest world headlines and email them to me every day at 08:00.”*
+
+That can work **in principle** once those tools exist and the host is set up correctly: the script would use your existing mail path (e.g. Microsoft Graph / SMTP) with credentials from the environment or a secrets file the cron user can read; the schedule would trigger that script on the VPS. In practice you still need **clear boundaries** (sandbox, reviewed code, rate limits, maybe human approval before installing a cron line) so arbitrary automation does not become a remote-code-execution footgun.
+
 ## Source layout
 
 - `src/core/` — `config` (includes `load_config` + startup check/reset helpers), `microsoft_agent` (runtime JSON + MSAL), LLM + MCP loop, session memory, shared chat phrases.
