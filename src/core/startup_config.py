@@ -1,4 +1,4 @@
-"""Sprawdzenie konfiguracji po starcie: wymagane klucze, MCP health, opcjonalnie Graph."""
+"""Startup configuration checks: required keys, MCP health, optional Graph."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from .types import AgentConfig
 
 @dataclass
 class StartupCheckResult:
-    """`blocking` puste = można gadać z LLM. `mcp_summary` / `graph_summary` — krótki podgląd do raportu OK."""
+    """`blocking` empty = LLM chat is allowed. `mcp_summary` / `graph_summary` short lines for the OK report."""
 
     ok: bool
     mcp_summary: str = ""
@@ -28,37 +28,37 @@ def run_startup_checks(config: AgentConfig) -> StartupCheckResult:
     warnings: list[str] = []
 
     if not config.mcp_api_key.strip():
-        mcp_summary = "wyłączone (brak MCP_API_KEY)"
+        mcp_summary = "disabled (no MCP_API_KEY)"
     else:
         try:
             mcp_health(config)
             mcp_summary = f"{config.mcp_server_url} — OK"
         except Exception as exc:
-            mcp_summary = f"{config.mcp_server_url} — błąd ({type(exc).__name__})"
+            mcp_summary = f"{config.mcp_server_url} — error ({type(exc).__name__})"
             warnings.append(
-                f"MCP: {str(exc)[:200]}. Wklej poprawny klucz: /jarvis-set-mcp-key <klucz>"
+                f"MCP: {str(exc)[:200]}. Set a valid key: /jarvis-set-mcp-key <key>"
             )
 
     tok = resolve_graph_access_token(config)
     if tok:
         graph_summary = "OK"
     elif not config.microsoft_client_id.strip():
-        graph_summary = "brak"
+        graph_summary = "none"
         warnings.append(
-            "Graph: brak tokenu i Client ID — /microsoft-set-client <UUID> potem /microsoft-login "
-            "albo /microsoft-set-graph-token"
+            "Graph: no token and no Client ID — /microsoft-set-client <UUID> then /microsoft-login "
+            "or /microsoft-set-graph-token"
         )
     else:
-        graph_summary = "czeka na logowanie (/microsoft-login)"
+        graph_summary = "waiting for login (/microsoft-login)"
 
     if not config.openrouter_api_key.strip():
         blocking.append(
-            "OPENROUTER_API_KEY — brak. W czacie: /jarvis-set-openrouter-key <klucz> (zapis obok logów; wyciek na kanale możliwy)."
+            "OPENROUTER_API_KEY missing. In chat: /jarvis-set-openrouter-key <key> (saved next to logs; channel leak risk)."
         )
 
     if not config.telegram_allowed_chat_ids:
         warnings.append(
-            "TELEGRAM_ALLOWED_CHAT_IDS puste — każdy z linkiem może pisać; produkcja: ustaw listę chat_id w .env."
+            "TELEGRAM_ALLOWED_CHAT_IDS empty — anyone with the bot link can chat; production: set chat_id list in .env."
         )
 
     return StartupCheckResult(
@@ -70,37 +70,37 @@ def run_startup_checks(config: AgentConfig) -> StartupCheckResult:
     )
 
 
-def format_startup_report_plain(result: StartupCheckResult, *, title: str = "Konfiguracja jarvis1net") -> str:
-    """Krótki tekst do Telegrama / logów."""
+def format_startup_report_plain(result: StartupCheckResult, *, title: str = "jarvis1net configuration") -> str:
+    """Short plain text for Telegram / logs."""
     if result.ok:
         lines = [
             title,
             "",
-            "Konfiguracja OK.",
+            "Configuration OK.",
             f"MCP: {result.mcp_summary}",
             f"Microsoft Graph: {result.graph_summary}",
         ]
         for w in result.warnings:
-            lines.append(f"(uwaga) {w}")
+            lines.append(f"(warning) {w}")
         return "\n".join(lines)
 
-    lines = [title, "", "Konfiguracja niepełna — dopisz brakujące:"]
+    lines = [title, "", "Configuration incomplete — add the missing items:"]
     for b in result.blocking:
         lines.append(f"- {b}")
     for w in result.warnings:
         lines.append(f"- {w}")
     lines.append("")
     lines.append(
-        "Z czatu (świadomie ryzykowne): /jarvis-set-openrouter-key …, /jarvis-set-mcp-key …; "
-        "Microsoft: /microsoft-set-client + /microsoft-login lub /microsoft-set-graph-token. "
-        "Wyczyść zapisane dane bota: /jarvis-config-reset."
+        "From chat (know the risk): /jarvis-set-openrouter-key …, /jarvis-set-mcp-key …; "
+        "Microsoft: /microsoft-set-client + /microsoft-login or /microsoft-set-graph-token. "
+        "Clear saved bot data: /jarvis-config-reset."
     )
     return "\n".join(lines)
 
 
 def reset_runtime_agent_state(config: AgentConfig) -> list[str]:
     """
-    Czyści runtime z czatu + cache MSAL + pamięć rozmów + jarvis_runtime_secrets.json. Nie usuwa .env.
+    Clears chat-saved runtime + MSAL cache + conversation memory + jarvis_runtime_secrets.json. Does not remove .env.
     """
     out: list[str] = []
     out.append(clear_settings_file(config.audit_log_path))
@@ -109,5 +109,5 @@ def reset_runtime_agent_state(config: AgentConfig) -> list[str]:
     store = get_session_store(config.session_context_path)
     store.clear_all_sessions()
     store.save()
-    out.append("Wyczyszczono pamięć rozmów (wszystkie sesje w session_paths.json).")
+    out.append("Cleared conversation memory (all sessions in session_paths.json).")
     return out

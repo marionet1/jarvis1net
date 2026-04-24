@@ -79,10 +79,10 @@ def load_mcp_tools(config: AgentConfig) -> list[dict[str, Any]]:
 def filter_mcp_tools_when_graph_token_present(
     config: AgentConfig, tools: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
-    """Jeśli agent już dołącza token Graph, `microsoft_integration_status` jest zbędne — usuwa je z manifestu.
+    """When the agent already sends a Graph token, `microsoft_integration_status` is redundant — drop it from the manifest.
 
-    To zmniejsza rozmiar listy `tools` w każdym wywołaniu chat completions i zapobiega „preambule”
-    z pustym `{}` przed każdą operacją Microsoft.
+    Shrinks the `tools` list on each chat completions call and avoids an empty-`{}` “preamble”
+    before every Microsoft action.
     """
     if not resolve_graph_access_token(config):
         return tools

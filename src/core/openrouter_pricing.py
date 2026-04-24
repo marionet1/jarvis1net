@@ -1,4 +1,4 @@
-"""Estymata kosztu USD z publicznego cennika OpenRouter (`GET /api/v1/models`)."""
+"""USD cost estimate from OpenRouter public pricing (`GET /api/v1/models`)."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ _models_cache_at: float = 0.0
 
 
 def _fetch_models_list(api_key: str) -> list[dict[str, Any]]:
-    """Lista modeli z pricing; cache in-process ~1 h. Klucz API opcjonalny (endpoint często działa i bez)."""
+    """Model list with pricing; in-process cache ~1 h. API key optional (endpoint often works without)."""
     global _models_cache, _models_cache_at
     now = time.monotonic()
     with _models_lock:
@@ -32,7 +32,7 @@ def _fetch_models_list(api_key: str) -> list[dict[str, Any]]:
     data = resp.json()
     rows = data.get("data") if isinstance(data, dict) else None
     if not isinstance(rows, list):
-        raise RuntimeError("OpenRouter /models: brak tablicy `data`")
+        raise RuntimeError("OpenRouter /models: missing `data` array")
     with _models_lock:
         _models_cache = rows
         _models_cache_at = time.monotonic()
@@ -57,7 +57,7 @@ def _to_float(x: Any) -> float | None:
 
 
 def estimate_openrouter_usd(api_key: str, model_id: str, prompt_tokens: int, completion_tokens: int) -> float | None:
-    """USD z pól `pricing.prompt` / `pricing.completion` (USD za 1 token). None = brak danych / błąd."""
+    """USD from `pricing.prompt` / `pricing.completion` (USD per token). None = no data / error."""
     if prompt_tokens <= 0 and completion_tokens <= 0:
         return None
     try:
@@ -95,11 +95,11 @@ def build_compact_token_usage_footer(
     limit_hit: bool = False,
 ) -> str:
     """
-    Jedna zwięzła linia: ``Tokens: prompt+completion=total est ~$...`` (+ opcjonalnie rundy / limit).
+    One compact line: ``Tokens: prompt+completion=total est ~$...`` (+ optional rounds / limit).
     """
     if prompt_tokens <= 0 and completion_tokens <= 0:
         return (
-            "\n\n- Tokeny: brak pola usage w odpowiedziach API (OpenRouter czasem nie zwraca usage)."
+            "\n\n- Tokens: no usage field in API responses (OpenRouter sometimes omits usage)."
         )
     total = prompt_tokens + completion_tokens
     parts = [f"Tokens: {prompt_tokens}+{completion_tokens}={total}"]

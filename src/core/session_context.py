@@ -142,12 +142,12 @@ class SessionStore:
             self._by_key.pop(session_key, None)
 
     def clear_all_sessions(self) -> None:
-        """Usuwa wszystkie sesje z pamięci (plik zostanie nadpisany przy następnym save)."""
+        """Clears all sessions in memory (file is rewritten on next save)."""
         with self._lock:
             self._by_key.clear()
 
     def list_session_keys(self) -> list[str]:
-        """Klucze sesji (np. chat_id Telegram) — do powiadomień przy starcie."""
+        """Session keys (e.g. Telegram chat_id) — for startup notifications."""
         with self._lock:
             return list(self._by_key.keys())
 

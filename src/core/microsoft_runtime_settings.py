@@ -47,10 +47,10 @@ def clear_settings_file(audit_log_path: str) -> str:
     try:
         if path.exists():
             path.unlink()
-            return "Usunięto plik ustawień Microsoft z czatu (microsoft_agent_settings.json)."
-        return "Brak zapisanego pliku ustawień — nic do usunięcia."
+            return "Removed Microsoft settings file from chat (microsoft_agent_settings.json)."
+        return "No saved settings file — nothing to remove."
     except OSError as exc:
-        return f"Nie udało się usunąć pliku: {exc}"
+        return f"Could not remove settings file: {exc}"
 
 
 def validate_client_id(value: str) -> bool:

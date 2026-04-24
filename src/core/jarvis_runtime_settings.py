@@ -1,4 +1,4 @@
-"""Klucze OpenRouter / MCP zapisywane z czatu (obok logów), nadpisują .env gdy są w pliku."""
+"""OpenRouter / MCP keys saved from chat (next to logs); override .env when present in this file."""
 
 from __future__ import annotations
 
@@ -41,7 +41,7 @@ def clear_jarvis_runtime_file(audit_log_path: str) -> str:
     try:
         if path.exists():
             path.unlink()
-            return "Usunięto jarvis_runtime_secrets.json (klucze z czatu)."
-        return "Brak jarvis_runtime_secrets.json — nic do usunięcia."
+            return "Removed jarvis_runtime_secrets.json (keys saved from chat)."
+        return "No jarvis_runtime_secrets.json — nothing to remove."
     except OSError as exc:
-        return f"Nie usunięto jarvis_runtime_secrets.json: {exc}"
+        return f"Could not remove jarvis_runtime_secrets.json: {exc}"

@@ -40,7 +40,7 @@ from core.startup_config import (
 
 
 def _looks_like_telegram_chat_key(key: str) -> bool:
-    """Klucz sesji = zwykle numeryczny chat_id (grupy mogą mieć ujemny ID)."""
+    """Session key is usually numeric chat_id (groups may use a negative id)."""
     s = key.strip()
     if not s:
         return False
@@ -52,7 +52,7 @@ def _looks_like_telegram_chat_key(key: str) -> bool:
 def run_telegram_startup_hooks(
     config: AgentConfig, *, startup_check: StartupCheckResult | None = None
 ) -> None:
-    """Po restarcie procesu: opcjonalnie czyści session_paths, wysyła powitanie i raport konfiguracji."""
+    """After process restart: optionally clear sessions, send startup message and config report."""
     chk = startup_check if startup_check is not None else run_startup_checks(config)
     if not config.telegram_clear_session_on_start and not config.telegram_notify_on_start:
         return
@@ -77,22 +77,22 @@ def run_telegram_startup_hooks(
         return
     if not notify_targets:
         print(
-            "jarvis1net: TELEGRAM_NOTIFY_ON_START włączone, ale brak odbiorców — ustaw TELEGRAM_ALLOWED_CHAT_IDS "
-            "albo napisz do bota raz (zapisze sesję), potem kolejny restart wyśle powitanie na znany chat_id."
+            "jarvis1net: TELEGRAM_NOTIFY_ON_START is on but there are no recipients — set TELEGRAM_ALLOWED_CHAT_IDS "
+            "or message the bot once (session is saved), then the next restart will send startup text to a known chat_id."
         )
         return
     for cid_s in notify_targets:
         try:
             send_message(config.telegram_bot_token, int(cid_s), config.telegram_startup_message)
         except Exception as exc:
-            print(f"jarvis1net: powitanie startowe do chat_id={cid_s} nie powiodło się: {exc}")
+            print(f"jarvis1net: startup message to chat_id={cid_s} failed: {exc}")
 
-    report = format_startup_report_plain(chk, title="Konfiguracja jarvis1net (po restarcie)")
+    report = format_startup_report_plain(chk, title="jarvis1net configuration (after restart)")
     for cid_s in notify_targets:
         try:
             send_message(config.telegram_bot_token, int(cid_s), report)
         except Exception as exc:
-            print(f"jarvis1net: raport konfiguracji do chat_id={cid_s} nie powiodło się: {exc}")
+            print(f"jarvis1net: config report to chat_id={cid_s} failed: {exc}")
 
 
 # Natural phrases that clear chat memory (without slash commands).
@@ -106,9 +106,11 @@ _CLEAR_HISTORY_PHRASES = frozenset(
     }
 )
 
-# Dokładna treść wiadomości (bez slash) — unikamy przypadkowego „restart” w zdaniu.
+# Exact message text (no slash) — avoids accidental “restart” inside a sentence.
 _RESTART_BOT_PHRASES = frozenset(
     {
+        "restart bot",
+        "restart the bot",
         "restart bota",
         "restartuj bota",
         "zrestartuj bota",
@@ -123,14 +125,14 @@ def _restart_from_chat_allowed(config: AgentConfig, chat_id_s: str) -> bool:
 
 
 def _jarvis_secrets_from_chat_allowed(config: AgentConfig, chat_id_s: str) -> bool:
-    """Gdy brak TELEGRAM_ALLOWED_CHAT_IDS — każdy może zapisać klucze (bootstrap, ryzyko); inaczej tylko whitelist."""
+    """If TELEGRAM_ALLOWED_CHAT_IDS is empty anyone can save keys (bootstrap risk); else whitelist only."""
     if not config.telegram_allowed_chat_ids:
         return True
     return chat_id_s in config.telegram_allowed_chat_ids
 
 
 def _schedule_telegram_self_restart() -> None:
-    """Opóźniony restart usługi user systemd (żeby zdążyć wysłać odpowiedź na Telegram)."""
+    """Delayed user systemd restart so Telegram can receive the reply first."""
 
     def worker() -> None:
         time.sleep(1.5)
@@ -151,7 +153,7 @@ def _schedule_telegram_self_restart() -> None:
 
 @dataclass(frozen=True)
 class TelegramOut:
-    """Wyjście do Telegrama: zwykły tekst albo HTML (parse_mode)."""
+    """Telegram payload: plain text or HTML (parse_mode)."""
 
     text: str
     parse_mode: str | None = None
@@ -161,67 +163,70 @@ _INFO_HTML_MAX = 3800
 
 
 def _cmd_line(cmd: str, description: str) -> str:
-    """Jedna linia w stylu BotFather: /komenda - opis (HTML)."""
+    """One BotFather-style line: /command - description (HTML)."""
     return f"{html.escape(cmd)} - {html.escape(description)}\n"
 
 
 def _commands_info_botfather_style_html() -> str:
-    """Sekcje pogrubione + lista „/polecenie - opis” jak u @BotFather."""
+    """Bold sections + “/command - description” list like @BotFather."""
     parts: list[str] = [
-        "Możesz sterować botem, wysyłając te komendy:\n\n",
-        "<b>Ogólne</b>\n\n",
-        _cmd_line("/start", "Pomoc i skrót konfiguracji"),
-        _cmd_line("/help", "To samo co /start"),
-        _cmd_line("/info", "Ta lista: komendy + narzędzia MCP"),
-        _cmd_line("/jarvis-info", "Alias /info"),
+        "You can control the bot with these commands:\n\n",
+        "<b>General</b>\n\n",
+        _cmd_line("/start", "Help and quick setup hints"),
+        _cmd_line("/help", "Same as /start"),
+        _cmd_line("/info", "This list: commands + MCP tools"),
+        _cmd_line("/jarvis-info", "Alias for /info"),
         "\n",
-        "<b>Bot i limity MCP</b>\n\n",
-        _cmd_line("/restart", "Restart procesu (tylko TELEGRAM_ALLOWED_CHAT_IDS)"),
-        _cmd_line("/jarvis-restart", "Alias /restart"),
-        _cmd_line("/jarvis-limits", "Limity: rundy narzędzi, max znaków JSON, timeout"),
-        _cmd_line("/mcp-limits", "Alias /jarvis-limits"),
-        _cmd_line("/limits", "Alias /jarvis-limits"),
-        _cmd_line("/jarvis-config-check", "Sprawdza .env + MCP + Graph (to samo co po restarcie)"),
-        _cmd_line("/config-check", "Alias /jarvis-config-check"),
-        _cmd_line("/jarvis-config-reset", "Czyści runtime MS + klucze z czatu + cache MSAL + pamięć czatu"),
-        _cmd_line("/config-reset", "Alias /jarvis-config-reset"),
-        _cmd_line("/jarvis-set-openrouter-key", "Zapisuje OPENROUTER z czatu do pliku obok logów"),
-        _cmd_line("/jarvis-set-mcp-key", "Zapisuje MCP_API_KEY z czatu do pliku obok logów"),
+        "<b>Bot and MCP limits</b>\n\n",
+        _cmd_line("/restart", "Restart process (TELEGRAM_ALLOWED_CHAT_IDS only)"),
+        _cmd_line("/jarvis-restart", "Alias for /restart"),
+        _cmd_line("/jarvis-limits", "Tool rounds, max JSON chars, timeout"),
+        _cmd_line("/mcp-limits", "Alias for /jarvis-limits"),
+        _cmd_line("/limits", "Alias for /jarvis-limits"),
+        _cmd_line("/jarvis-config-check", "Checks .env + MCP + Graph (same as on startup)"),
+        _cmd_line("/config-check", "Alias for /jarvis-config-check"),
+        _cmd_line("/jarvis-config-reset", "Clears MS runtime + chat-saved keys + MSAL cache + chat memory"),
+        _cmd_line("/config-reset", "Alias for /jarvis-config-reset"),
+        _cmd_line("/jarvis-set-openrouter-key", "Saves OPENROUTER key from chat next to logs"),
+        _cmd_line("/jarvis-set-mcp-key", "Saves MCP_API_KEY from chat next to logs"),
         "\n",
-        "<b>Pamięć rozmowy</b>\n\n",
-        _cmd_line("clear history", "Czyści kontekst (też: clear chat history, reset chat, start over, clear conversation)"),
+        "<b>Conversation memory</b>\n\n",
+        _cmd_line("clear history", "Clears context (also: clear chat history, reset chat, start over, clear conversation)"),
         "\n",
         "<b>Microsoft Graph</b>\n\n",
-        _cmd_line("/microsoft-set-client", "Client ID z Azure + opcjonalnie tenant → plik runtime"),
-        _cmd_line("/microsoft-set-tenant", "Tenant: consumers, organizations, common lub GUID"),
-        _cmd_line("/microsoft-set-scopes", "Lista scope (np. Mail.ReadWrite); alias: /microsoft-scopes"),
-        _cmd_line("/microsoft-show-settings", "Podsumowanie MS + redirecty; alias: /microsoft-config"),
-        _cmd_line("/microsoft-login", "Logowanie device code w tle; alias: /msft-login"),
-        _cmd_line("/microsoft-logout", "Wylogowanie + cache MSAL; alias: /msft-logout"),
-        _cmd_line("/microsoft-set-graph-token", "Wklej access token do Graph; alias: /microsoft-paste-token"),
-        _cmd_line("/microsoft-clear-runtime", "Czyści plik runtime ustawień; alias: /microsoft-clear-settings"),
+        _cmd_line("/microsoft-set-client", "Azure Client ID + optional tenant → runtime file"),
+        _cmd_line("/microsoft-set-tenant", "Tenant: consumers, organizations, common, or GUID"),
+        _cmd_line("/microsoft-set-scopes", "Scope list (e.g. Mail.ReadWrite); alias: /microsoft-scopes"),
+        _cmd_line("/microsoft-show-settings", "MS summary + redirect URIs; alias: /microsoft-config"),
+        _cmd_line("/microsoft-login", "Device code login in background; alias: /msft-login"),
+        _cmd_line("/microsoft-logout", "Logout + MSAL cache; alias: /msft-logout"),
+        _cmd_line("/microsoft-set-graph-token", "Paste Graph access token; alias: /microsoft-paste-token"),
+        _cmd_line("/microsoft-clear-runtime", "Clears runtime settings file; alias: /microsoft-clear-settings"),
         "\n",
-        "<b>Bez slasha (jak u BotFather — „frazy”)</b>\n\n",
-        _cmd_line("restart bota", "To samo co /restart (dokładnie ta fraza lub: restartuj bota, zrestartuj bota, restart jarvis)"),
+        "<b>No slash (BotFather-style phrases)</b>\n\n",
+        _cmd_line(
+            "restart bot",
+            "Same as /restart (exact phrase; also: restart the bot, restart bota, restart jarvis)",
+        ),
     ]
     return "".join(parts)
 
 
 def build_info_html_chunks(config: AgentConfig) -> list[str]:
-    """Kilka wiadomości HTML (&lt; 4096 znaków każda) — komendy + narzędzia MCP."""
+    """One or more HTML chunks (&lt; 4096 chars each) — commands + MCP tools."""
     cmd_html = _commands_info_botfather_style_html()
     head = (
         "<b>jarvis1net — /info</b>\n\n"
         + cmd_html
-        + "\n<b>Narzędzia MCP</b>\n\n"
-        + f"<i>Serwer:</i> <code>{html.escape(config.mcp_server_url.strip())}</code>\n\n"
+        + "\n<b>MCP tools</b>\n\n"
+        + f"<i>Server:</i> <code>{html.escape(config.mcp_server_url.strip())}</code>\n\n"
     )
     chunks: list[str] = []
     current = head
     mcp_note = ""
 
     if not config.mcp_api_key.strip():
-        mcp_note = "<b>MCP</b>: <i>brak MCP_API_KEY — lista narzędzi niedostępna.</i>\n"
+        mcp_note = "<b>MCP</b>: <i>no MCP_API_KEY — tool list unavailable.</i>\n"
         one = (current + mcp_note)[:_INFO_HTML_MAX]
         return [one]
 
@@ -229,7 +234,7 @@ def build_info_html_chunks(config: AgentConfig) -> list[str]:
         tools = filter_mcp_tools_when_graph_token_present(config, load_mcp_tools(config))
     except Exception as exc:
         err = html.escape(str(exc)[:500])
-        one = (current + f"<b>MCP</b>: <i>nie udało się pobrać manifestu:</i>\n<pre>{err}</pre>")[:_INFO_HTML_MAX]
+        one = (current + f"<b>MCP</b>: <i>failed to load tool manifest:</i>\n<pre>{err}</pre>")[:_INFO_HTML_MAX]
         return [one]
 
     sorted_specs = sorted(
@@ -253,13 +258,13 @@ def build_info_html_chunks(config: AgentConfig) -> list[str]:
             tool_blocks.append(f"<code>{html.escape(name)}</code>\n")
 
     if not tool_blocks:
-        current += "<i>(pusty manifest narzędzi)</i>"
+        current += "<i>(empty tool manifest)</i>"
         return [current[:_INFO_HTML_MAX]]
 
     for block in tool_blocks:
         if len(current) + len(block) > _INFO_HTML_MAX:
             chunks.append(current)
-            current = "<b>Narzędzia MCP</b> <i>(ciąg dalszy)</i>\n\n" + block
+            current = "<b>MCP tools</b> <i>(continued)</i>\n\n" + block
         else:
             current += block
     if current.strip():
@@ -321,32 +326,32 @@ def process_message(
         if not _restart_from_chat_allowed(config, chat_id_s):
             if not config.telegram_allowed_chat_ids:
                 return [
-                    "Restart z czatu jest możliwy tylko gdy w .env ustawisz TELEGRAM_ALLOWED_CHAT_IDS "
-                    "(wtedy tylko te czaty mogą wysłać /restart)."
+                    "Restart from chat works only if you set TELEGRAM_ALLOWED_CHAT_IDS in .env "
+                    "(then only those chats may send /restart)."
                 ]
-            return ["Brak uprawnień do restartu z tego czatu."]
+            return ["No permission to restart from this chat."]
         _schedule_telegram_self_restart()
         return [
-            "OK — za ok. 2 s restartuję proces bota (jarvis1net-telegram). "
-            "Za chwilę powinieneś dostać wiadomość po starcie (jeśli TELEGRAM_NOTIFY_ON_START=1)."
+            "OK — in about 2 s I will restart the bot process (jarvis1net-telegram). "
+            "You should get a startup message shortly (if TELEGRAM_NOTIFY_ON_START=1)."
         ]
 
     if command_base in {"/start", "/help"}:
         return [
             "jarvis1net — chat naturally and ask for file operations, directory listings, MCP health checks, and more.\n"
             "The bot keeps short chat memory for this conversation. To clear it, send: 'clear history'.\n"
-            "Po restarcie procesu bota pamięć czatu może być automatycznie wyzerowana i dostaniesz krótką wiadomość "
-            "(domyślnie włączone — patrz TELEGRAM_NOTIFY_ON_START / TELEGRAM_CLEAR_SESSION_ON_START w .env).\n"
+            "After a bot process restart, chat memory may be cleared automatically and you may get a short notice "
+            "(default on — see TELEGRAM_NOTIFY_ON_START / TELEGRAM_CLEAR_SESSION_ON_START in .env).\n"
             "When MCP tools are used, you will first receive a short 'Using mcp-jarvis1net' message with tool name and arguments.\n"
-            "Microsoft (Graph): /microsoft-set-client <Client-ID> [tenant], potem /microsoft-login. "
-            "Konto osobiste (@outlook itd.): tenant **consumers** + w Azure redirect …/consumers/oauth2/nativeclient. "
-            "Szybka zmiana tenantu: /microsoft-set-tenant consumers | organizations | common. "
-            "Token z PC: /microsoft-set-graph-token. Szczegóły: /microsoft-show-settings.\n"
-            "Limit MCP (rundy narzędzi / obcięcie JSON): /jarvis-limits\n"
-            "Klucze z czatu (ryzyko wycieku): **/jarvis-set-openrouter-key** …, **/jarvis-set-mcp-key** …. "
-            "Sprawdzenie: **/jarvis-config-check**. Reset zapisów bota: **/jarvis-config-reset** (jak /restart).\n"
-            "Restart procesu bota (tylko czaty z TELEGRAM_ALLOWED_CHAT_IDS): **/restart** albo napisz np. „restart bota”.\n"
-            "Pełna lista komend + narzędzia MCP (ładny układ HTML): **/info**"
+            "Microsoft (Graph): /microsoft-set-client <Client-ID> [tenant], then /microsoft-login. "
+            "Personal Microsoft account (@outlook etc.): tenant **consumers** + in Azure redirect …/consumers/oauth2/nativeclient. "
+            "Quick tenant change: /microsoft-set-tenant consumers | organizations | common. "
+            "Token from PC: /microsoft-set-graph-token. Details: /microsoft-show-settings.\n"
+            "MCP limits (tool rounds / JSON truncation): /jarvis-limits\n"
+            "Keys from chat (leak risk): **/jarvis-set-openrouter-key** …, **/jarvis-set-mcp-key** …. "
+            "Check: **/jarvis-config-check**. Reset saved bot data: **/jarvis-config-reset** (same guard as /restart).\n"
+            "Restart the bot (TELEGRAM_ALLOWED_CHAT_IDS only): **/restart** or e.g. “restart bot”.\n"
+            "Full command list + MCP tools (HTML): **/info**"
         ]
 
     if command_base in {"/info", "/jarvis-info"}:
@@ -354,135 +359,139 @@ def process_message(
 
     if command_base in {"/jarvis-config-check", "/config-check"}:
         chk = run_startup_checks(config)
-        return [format_startup_report_plain(chk, title="Konfiguracja jarvis1net (na żądanie)")]
+        return [format_startup_report_plain(chk, title="jarvis1net configuration (on demand)")]
 
     if command_base == "/jarvis-set-openrouter-key":
         if not _jarvis_secrets_from_chat_allowed(config, chat_id_s):
-            return ["Brak uprawnień (ten chat nie jest na liście TELEGRAM_ALLOWED_CHAT_IDS)."]
+            return ["No permission (this chat is not in TELEGRAM_ALLOWED_CHAT_IDS)."]
         parts = stripped.split(None, 1)
         key = parts[1].strip() if len(parts) > 1 else ""
         if not key:
-            return ["Użycie: /jarvis-set-openrouter-key <klucz z https://openrouter.ai/keys>"]
+            return ["Usage: /jarvis-set-openrouter-key <key from https://openrouter.ai/keys>"]
         if len(key) < 12:
-            return ["Klucz wygląda na zbyt krótki."]
+            return ["Key looks too short."]
         save_merged_jarvis_runtime(config.audit_log_path, {"openrouter_api_key": key})
         return [
-            "Zapisano OpenRouter w jarvis_runtime_secrets.json (obok logów). "
-            "Od następnej wiadomości używany jest nowy klucz (restart niepotrzebny). /jarvis-config-check — podgląd."
+            "Saved OpenRouter key to jarvis_runtime_secrets.json (next to logs). "
+            "It applies from the next message (no restart). /jarvis-config-check — preview."
         ]
 
     if command_base == "/jarvis-set-mcp-key":
         if not _jarvis_secrets_from_chat_allowed(config, chat_id_s):
-            return ["Brak uprawnień (ten chat nie jest na liście TELEGRAM_ALLOWED_CHAT_IDS)."]
+            return ["No permission (this chat is not in TELEGRAM_ALLOWED_CHAT_IDS)."]
         parts = stripped.split(None, 1)
         key = parts[1].strip() if len(parts) > 1 else ""
         if not key:
-            return ["Użycie: /jarvis-set-mcp-key <klucz MCP>"]
+            return ["Usage: /jarvis-set-mcp-key <MCP API key>"]
         if len(key) < 8:
-            return ["Klucz MCP wygląda na zbyt krótki."]
+            return ["MCP key looks too short."]
         save_merged_jarvis_runtime(config.audit_log_path, {"mcp_api_key": key})
         return [
-            "Zapisano MCP_API_KEY w jarvis_runtime_secrets.json. "
-            "Od następnej wiadomości obowiązuje (restart niepotrzebny). /jarvis-config-check — podgląd."
+            "Saved MCP_API_KEY to jarvis_runtime_secrets.json. "
+            "It applies from the next message (no restart). /jarvis-config-check — preview."
         ]
 
     if command_base in {"/jarvis-config-reset", "/config-reset"}:
         if not _restart_from_chat_allowed(config, chat_id_s):
             if not config.telegram_allowed_chat_ids:
                 return [
-                    "Reset z czatu jest możliwy tylko gdy w .env ustawisz TELEGRAM_ALLOWED_CHAT_IDS "
-                    "(tylko te czaty mogą wysłać /jarvis-config-reset)."
+                    "Reset from chat works only if you set TELEGRAM_ALLOWED_CHAT_IDS in .env "
+                    "(only those chats may send /jarvis-config-reset)."
                 ]
-            return ["Brak uprawnień do resetu z tego czatu."]
+            return ["No permission to reset from this chat."]
         lines = reset_runtime_agent_state(config)
         return [
-            "Wykonano reset zapisów bota (nie zmienia .env na dysku):\n"
+            "Reset saved bot data (does not change .env on disk):\n"
             + "\n".join(f"- {x}" for x in lines)
-            + "\n\nDalej: /jarvis-set-openrouter-key …, /jarvis-set-mcp-key …, Microsoft: /microsoft-set-client + "
-            "/microsoft-login lub /microsoft-set-graph-token. Sprawdź: /jarvis-config-check."
+            + "\n\nNext: /jarvis-set-openrouter-key …, /jarvis-set-mcp-key …, Microsoft: /microsoft-set-client + "
+            "/microsoft-login or /microsoft-set-graph-token. Check: /jarvis-config-check."
         ]
 
     if command_base in {"/jarvis-limits", "/mcp-limits", "/limits"}:
         return [
-            "jarvis1net — limity MCP w tej instancji:\n"
-            f"- MCP_MAX_TOOL_ROUNDS (efektywnie): {config.mcp_max_tool_rounds}\n"
+            "jarvis1net — MCP limits for this instance:\n"
+            f"- MCP_MAX_TOOL_ROUNDS (effective): {config.mcp_max_tool_rounds}\n"
             f"- MCP_TOOL_RESULT_MAX_CHARS: {config.mcp_tool_result_max_chars}\n"
-            f"- MCP_MICROSOFT_TOOL_RESULT_MAX_CHARS (wyniki microsoft_*): {config.mcp_microsoft_tool_result_max_chars}\n"
+            f"- MCP_MICROSOFT_TOOL_RESULT_MAX_CHARS (microsoft_*): {config.mcp_microsoft_tool_result_max_chars}\n"
             f"- MCP_CHAT_COMPLETION_MAX_TOKENS: {config.mcp_chat_completion_max_tokens}\n"
             f"- MCP_TIMEOUT_SEC: {config.mcp_timeout_sec}\n"
             f"- OPENROUTER_SHOW_COST_ESTIMATE: {1 if config.openrouter_show_cost_estimate else 0} "
-            "(stopka ~USD z cennika /api/v1/models)\n"
-            f"- DISPLAY_TIMEZONE: {config.display_timezone or '(brak — model cytuje czasy Graph jak w UTC/Z)'}\n"
-            f"- Plik .env: {Path(__file__).resolve().parents[1] / '.env'}\n"
-            "Zmiana: edytuj .env w katalogu repo (nie src/) i zrestartuj bota."
+            "(footer ~USD from /api/v1/models pricing)\n"
+            f"- DISPLAY_TIMEZONE: {config.display_timezone or '(none — model quotes Graph times as UTC/Z)'}\n"
+            f"- .env file: {Path(__file__).resolve().parents[1] / '.env'}\n"
+            "To change: edit .env in the repo root (not src/) and restart the bot."
         ]
 
     if command_base == "/microsoft-set-client":
         parts = stripped.split()
         if len(parts) < 2:
             return [
-                "Użycie: /microsoft-set-client <Application-Client-ID> [tenant]\n"
-                "tenant: np. organizations, common, consumers lub GUID katalogu (domyślnie organizations — konta służbowe).\n"
-                "W Azure: rejestracja aplikacji → public client + device code + Allow public client flows."
+                "Usage: /microsoft-set-client <Application-Client-ID> [tenant]\n"
+                "tenant: e.g. organizations, common, consumers, or directory GUID (default organizations — work accounts).\n"
+                "In Azure: app registration → public client + device code + Allow public client flows."
             ]
         cid = parts[1].strip()
         tenant = parts[2].strip() if len(parts) > 2 else "organizations"
         if not validate_client_id(cid):
-            return ["Client ID musi być pełnym UUID (format 8-4-4-4-12 z Azure Portal)."]
+            return ["Client ID must be a full UUID (8-4-4-4-12 from Azure Portal)."]
         save_merged_settings(config.audit_log_path, {"client_id": cid, "tenant_id": tenant})
         return [
-            f"Zapisano Client ID (tenant: {tenant}). Następnie wyślij /microsoft-login — bez restartu bota."
+            f"Saved Client ID (tenant: {tenant}). Next send /microsoft-login — no bot restart needed."
         ]
 
     if command_base == "/microsoft-set-tenant":
         parts = stripped.split()
         if len(parts) < 2:
             return [
-                "Użycie: /microsoft-set-tenant <consumers|organizations|common|GUID-katalogu>\n"
-                "— consumers: konto osobiste Microsoft (redirect w Azure: …/consumers/oauth2/nativeclient).\n"
-                "— organizations: konto służbowe (redirect …/organizations/…).\n"
-                "— common: MSA + organizacje (redirect …/common/…; bywa kapryśne).\n"
-                "Potem /microsoft-logout i /microsoft-login."
+                "Usage: /microsoft-set-tenant <consumers|organizations|common|directory-GUID>\n"
+                "— consumers: personal Microsoft account (Azure redirect: …/consumers/oauth2/nativeclient).\n"
+                "— organizations: work/school account (redirect …/organizations/…).\n"
+                "— common: MSA + orgs (redirect …/common/…; can be finicky).\n"
+                "Then /microsoft-logout and /microsoft-login."
             ]
         raw = parts[1].strip()
         t = raw.casefold()
         ok = t in ("common", "organizations", "consumers") or validate_client_id(raw)
         if not ok:
-            return ["Nieznany tenant — użyj consumers, organizations, common albo GUID katalogu z Azure."]
+            return ["Unknown tenant — use consumers, organizations, common, or directory GUID from Azure."]
         save_merged_settings(config.audit_log_path, {"tenant_id": raw})
-        return [f"Zapisano tenant: {raw}. Następnie /microsoft-logout → /microsoft-login (redirect w Azure musi pasować do tego segmentu)."]
+        return [
+            f"Saved tenant: {raw}. Next /microsoft-logout → /microsoft-login (Azure redirect must match this segment)."
+        ]
 
     if command_base in {"/microsoft-set-scopes", "/microsoft-scopes"}:
         parts = stripped.split(None, 1)
         if len(parts) < 2 or not parts[1].strip():
             scopes_txt = " ".join(config.microsoft_graph_scopes)
             return [
-                "Użycie: /microsoft-set-scopes User.Read Mail.Read …\n"
-                f"Aktualnie (efektywnie): {scopes_txt}"
+                "Usage: /microsoft-set-scopes User.Read Mail.Read …\n"
+                f"Currently (effective): {scopes_txt}"
             ]
         raw_scopes = parts[1].strip()
         scope_list = [s.strip() for s in raw_scopes.replace(",", " ").split() if s.strip()]
         if not scope_list:
-            return ["Podaj co najmniej jeden scope."]
+            return ["Provide at least one scope."]
         save_merged_settings(config.audit_log_path, {"graph_scopes": scope_list})
         return [
-            f"Zapisano {len(scope_list)} scope(y). Zgodne delegated permissions muszą być w Azure. Potem /microsoft-login."
+            f"Saved {len(scope_list)} scope(s). Matching delegated permissions must exist in Azure. Then /microsoft-login."
         ]
 
     if command_base in {"/microsoft-show-settings", "/microsoft-config"}:
         rt = read_settings(config.audit_log_path)
         cid_env = os.getenv("MICROSOFT_CLIENT_ID", "").strip()
-        src = "MICROSOFT_CLIENT_ID w .env" if cid_env else ("microsoft_agent_settings.json (czat/CLI)" if rt.get("client_id") else "brak")
+        src = "MICROSOFT_CLIENT_ID in .env" if cid_env else (
+            "microsoft_agent_settings.json (chat/CLI)" if rt.get("client_id") else "none"
+        )
         has_cache = Path(config.microsoft_token_cache_path).expanduser().exists()
-        cid_show = config.microsoft_client_id or "(brak)"
+        cid_show = config.microsoft_client_id or "(none)"
         ten_env = os.getenv("MICROSOFT_TENANT_ID", "").strip()
         ten_rt = str(rt.get("tenant_id") or "").strip()
         if ten_rt:
-            ten_src = "microsoft_agent_settings.json (nadpisuje .env)"
+            ten_src = "microsoft_agent_settings.json (overrides .env)"
         elif ten_env:
-            ten_src = "MICROSOFT_TENANT_ID w .env"
+            ten_src = "MICROSOFT_TENANT_ID in .env"
         else:
-            ten_src = "domyślnie organizations (brak pliku i env)"
+            ten_src = "default organizations (no file and no env)"
         tok_env = bool(os.getenv("MICROSOFT_GRAPH_ACCESS_TOKEN", "").strip())
         tok_rt = bool(
             isinstance(rt.get("graph_access_token"), str) and str(rt.get("graph_access_token")).strip()
@@ -490,23 +499,23 @@ def process_message(
         if tok_env:
             tok_src = "MICROSOFT_GRAPH_ACCESS_TOKEN (.env)"
         elif tok_rt:
-            tok_src = "graph_access_token (microsoft_agent_settings.json, np. /microsoft-set-graph-token)"
+            tok_src = "graph_access_token (microsoft_agent_settings.json, e.g. /microsoft-set-graph-token)"
         else:
-            tok_src = "brak (MSAL cache po /microsoft-login)"
+            tok_src = "none (MSAL cache after /microsoft-login)"
         redirs = recommended_native_redirect_uris(config.microsoft_tenant_id)
         redir_lines = "\n".join(f"  • {u}" for u in redirs)
         lines = [
-            "Microsoft — konfiguracja agenta:",
+            "Microsoft — agent configuration:",
             f"- Client ID: {cid_show}",
-            f"- Źródło Client ID: {src}",
-            f"- Tenant: {config.microsoft_tenant_id} (źródło: {ten_src})",
-            f"- Scope: {' '.join(config.microsoft_graph_scopes)}",
-            f"- Token Graph (nagłówek do MCP): {tok_src}",
-            "- W Azure (Mobile/desktop) zarejestruj dokładnie TEN redirect (jeden wpis, zgodny z tenantem):",
+            f"- Client ID source: {src}",
+            f"- Tenant: {config.microsoft_tenant_id} (source: {ten_src})",
+            f"- Scopes: {' '.join(config.microsoft_graph_scopes)}",
+            f"- Graph token (header to MCP): {tok_src}",
+            "- In Azure (Mobile/desktop) register exactly THIS redirect (one entry, must match tenant):",
             redir_lines,
-            f"- Plik ustawień: {settings_path(config.audit_log_path)}",
-            f"- Cache tokenów MSAL: {'tak' if has_cache else 'nie'}",
-            "Komendy: /microsoft-set-client …, /microsoft-set-tenant …, /microsoft-set-scopes …, /microsoft-login, "
+            f"- Settings file: {settings_path(config.audit_log_path)}",
+            f"- MSAL token cache: {'yes' if has_cache else 'no'}",
+            "Commands: /microsoft-set-client …, /microsoft-set-tenant …, /microsoft-set-scopes …, /microsoft-login, "
             "/microsoft-set-graph-token …, /microsoft-logout, /microsoft-clear-runtime",
         ]
         return ["\n".join(lines)]
@@ -518,29 +527,29 @@ def process_message(
         parts = stripped.split(None, 1)
         if len(parts) < 2 or not parts[1].strip():
             return [
-                "Użycie: /microsoft-set-graph-token <access_token>\n\n"
-                "Na swoim PC (po az login): "
+                "Usage: /microsoft-set-graph-token <access_token>\n\n"
+                "On your PC (after az login): "
                 "az account get-access-token --resource https://graph.microsoft.com -o tsv\n"
-                "Wklej wynik tutaj (jedna linia). Token zapisuje się w microsoft_agent_settings.json obok logów — "
-                "nie udostępniaj czatu. Nadpisuje .env tylko jeśli MICROSOFT_GRAPH_ACCESS_TOKEN jest pusty."
+                "Paste the output here (one line). Token is saved to microsoft_agent_settings.json next to logs — "
+                "do not share the chat. Overrides .env only if MICROSOFT_GRAPH_ACCESS_TOKEN is empty."
             ]
         tok = parts[1].strip()
         if tok.casefold().startswith("bearer "):
             tok = tok[7:].strip()
         if len(tok) < 30:
-            return ["Token wygląda na zbyt krótki — sprawdź, czy wkleiłeś pełny access_token (JWT)."]
+            return ["Token looks too short — ensure you pasted the full access_token (JWT)."]
         save_merged_settings(config.audit_log_path, {"graph_access_token": tok})
         return [
-            "Zapisano token Graph (runtime). Kolejne wywołania microsoft_* w MCP użyją go zamiast MSAL. "
-            "Wylogowanie: /microsoft-logout (czyści też ten token)."
+            "Saved Graph token (runtime). Next microsoft_* MCP calls use it instead of MSAL. "
+            "Logout: /microsoft-logout (clears this token too)."
         ]
 
     if command_base in {"/microsoft-login", "/msft-login"}:
         cfg = load_config()
         if not cfg.microsoft_client_id.strip():
             return [
-                "Brak Client ID. W czacie wyślij: /microsoft-set-client <UUID z Azure> [tenant]\n"
-                "albo ustaw MICROSOFT_CLIENT_ID w .env i zrestartuj bota."
+                "No Client ID. In chat send: /microsoft-set-client <UUID from Azure> [tenant]\n"
+                "or set MICROSOFT_CLIENT_ID in .env and restart the bot."
             ]
 
         bot_token = cfg.telegram_bot_token
@@ -554,17 +563,17 @@ def process_message(
                 final = run_device_code_login(cfg, notify=_notify)
                 send_message(bot_token, chat_id, final)
             except Exception as exc:
-                send_message(bot_token, chat_id, f"Logowanie Microsoft nie powiodło się: {exc}")
+                send_message(bot_token, chat_id, f"Microsoft login failed: {exc}")
 
         threading.Thread(target=_worker, daemon=True).start()
         return [
-            "Microsoft: za chwilę dostaniesz wiadomość z linkiem i kodem.\n"
-            "— Otwórz wyłącznie adres z tej wiadomości (np. https://microsoft.com/devicelogin), wpisz kod, dokończ logowanie.\n"
-            "— Nie wklejaj i nie otwieraj ręcznie adresu …/oauth2/nativeclient — to adres zwrotny OAuth, nie strona logowania; "
-            "wejście tam bez pełnego łańcucha logowania daje błąd o braku response_type.\n"
-            "— Jeśli tak jest: spróbuj Edge lub Chrome (Brave czasem obcina parametry URL) albo wyłącz blokady dla microsoft.com i login.microsoftonline.com.\n"
-            "W Azure: Allow public client flows oraz jeden redirect Mobile/desktop zgodny z tenantem (/microsoft-show-settings).\n"
-            "Może to potrwać kilka minut."
+            "Microsoft: you will get a message with a link and code shortly.\n"
+            "— Open only the URL from that message (e.g. https://microsoft.com/devicelogin), enter the code, finish sign-in.\n"
+            "— Do not paste or manually open …/oauth2/nativeclient — that is the OAuth redirect URI, not the login page; "
+            "opening it without the full login chain yields a response_type error.\n"
+            "— If stuck: try Edge or Chrome (Brave may strip URL params) or allow microsoft.com and login.microsoftonline.com.\n"
+            "In Azure: Allow public client flows and one Mobile/desktop redirect matching the tenant (/microsoft-show-settings).\n"
+            "This may take a few minutes."
         ]
 
     if command_base in {"/microsoft-logout", "/msft-logout"}:
@@ -608,7 +617,7 @@ def run_bot() -> None:
     offset = 0
     print("Telegram bot started (chat-only long polling).")
     startup_chk = run_startup_checks(config)
-    print(format_startup_report_plain(startup_chk, title="jarvis1net — raport konfiguracji (stdout)"))
+    print(format_startup_report_plain(startup_chk, title="jarvis1net — configuration report (stdout)"))
     run_telegram_startup_hooks(config, startup_check=startup_chk)
 
     while True:

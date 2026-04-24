@@ -8,7 +8,7 @@ from .jarvis_runtime_settings import read_jarvis_runtime
 from .microsoft_runtime_settings import read_settings
 from .types import AgentConfig
 
-# Zawsze repo root (…/jarvis1net/.env), niezależnie od cwd (np. systemd WorkingDirectory=src).
+# Always repo root (…/jarvis1net/.env), regardless of cwd (e.g. systemd WorkingDirectory=src).
 _DOTENV_PATH = Path(__file__).resolve().parents[2] / ".env"
 
 # Short delegated names only; MSAL injects openid/profile/offline_access. Do not pass those three here.
@@ -17,20 +17,20 @@ _DEFAULT_MS_SCOPES = (
 )
 
 _DEFAULT_TELEGRAM_STARTUP_MESSAGE = (
-    "Hej — jarvis1net wystartował po restarcie. "
-    "Pamięć rozmowy w tym czacie została wyzerowana; możemy gadać od zera."
+    "Hi — jarvis1net restarted. "
+    "Conversation memory in this chat was cleared; we can continue from a fresh context."
 )
 
 
 def _validated_display_timezone(raw: str) -> str:
-    """IANA (np. Europe/Warsaw). Puste = brak — model nie dostaje reguły konwersji z UTC."""
+    """IANA name (e.g. Europe/Warsaw). Empty = none — model does not get UTC→local conversion rules."""
     name = raw.strip()
     if not name:
         return ""
     try:
         ZoneInfo(name)
     except Exception:
-        print(f"jarvis1net: DISPLAY_TIMEZONE={name!r} jest niepoprawne — ignoruję. Użyj np. Europe/Warsaw.")
+        print(f"jarvis1net: DISPLAY_TIMEZONE={name!r} is invalid — ignoring. Use e.g. Europe/Warsaw.")
         return ""
     return name
 
@@ -103,8 +103,8 @@ def load_config() -> AgentConfig:
 
     ms_client = os.getenv("MICROSOFT_CLIENT_ID", "").strip() or str(rt.get("client_id") or "").strip()
 
-    # Tenant z pliku runtime (Telegram /microsoft-set-client) ma pierwszeństwo przed .env —
-    # inaczej MICROSOFT_TENANT_ID=organizations na VPS blokuje np. /microsoft-set-client … consumers (konto osobiste).
+    # Runtime file tenant (Telegram /microsoft-set-client) wins over .env —
+    # otherwise MICROSOFT_TENANT_ID=organizations on the host would block e.g. … consumers (personal account).
     ms_tenant_env = os.getenv("MICROSOFT_TENANT_ID", "").strip()
     rt_tenant = str(rt.get("tenant_id") or "").strip()
     if rt_tenant:

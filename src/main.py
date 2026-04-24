@@ -54,46 +54,46 @@ def main() -> None:
         if cmd == "/microsoft-set-client":
             parts = stripped.split()
             if len(parts) < 2:
-                print("Użycie: /microsoft-set-client <Client-ID> [tenant]\n")
+                print("Usage: /microsoft-set-client <Client-ID> [tenant]\n")
                 continue
             cid = parts[1].strip()
             tenant = parts[2].strip() if len(parts) > 2 else "organizations"
             if not validate_client_id(cid):
-                print("Client ID musi być pełnym UUID z Azure.\n")
+                print("Client ID must be a full UUID from Azure.\n")
                 continue
             save_merged_settings(config.audit_log_path, {"client_id": cid, "tenant_id": tenant})
-            print(f"Zapisano (tenant: {tenant}). Teraz /microsoft-login\n")
+            print(f"Saved (tenant: {tenant}). Next: /microsoft-login\n")
             continue
 
         if cmd == "/microsoft-set-tenant":
             parts = stripped.split()
             if len(parts) < 2:
                 print(
-                    "Użycie: /microsoft-set-tenant <consumers|organizations|common|GUID>\n"
+                    "Usage: /microsoft-set-tenant <consumers|organizations|common|GUID>\n"
                 )
                 continue
             raw = parts[1].strip()
             t = raw.casefold()
             ok = t in ("common", "organizations", "consumers") or validate_client_id(raw)
             if not ok:
-                print("Nieznany tenant.\n")
+                print("Unknown tenant.\n")
                 continue
             save_merged_settings(config.audit_log_path, {"tenant_id": raw})
-            print(f"Zapisano tenant: {raw}\n")
+            print(f"Saved tenant: {raw}\n")
             continue
 
         if cmd in {"/microsoft-set-scopes", "/microsoft-scopes"}:
             parts = stripped.split(None, 1)
             if len(parts) < 2 or not parts[1].strip():
                 print(" ".join(config.microsoft_graph_scopes))
-                print("Użycie: /microsoft-set-scopes User.Read Mail.Read …\n")
+                print("Usage: /microsoft-set-scopes User.Read Mail.Read …\n")
                 continue
             scope_list = [s.strip() for s in parts[1].replace(",", " ").split() if s.strip()]
             if not scope_list:
-                print("Podaj scope.\n")
+                print("Provide at least one scope.\n")
                 continue
             save_merged_settings(config.audit_log_path, {"graph_scopes": scope_list})
-            print(f"Zapisano {len(scope_list)} scope(y).\n")
+            print(f"Saved {len(scope_list)} scope(s).\n")
             continue
 
         if cmd in {"/jarvis-config-check", "/config-check"}:
@@ -111,53 +111,53 @@ def main() -> None:
             parts = stripped.split(None, 1)
             key = parts[1].strip() if len(parts) > 1 else ""
             if not key:
-                print("Użycie: /jarvis-set-openrouter-key <klucz>\n")
+                print("Usage: /jarvis-set-openrouter-key <key>\n")
                 continue
             if len(key) < 12:
-                print("Klucz zbyt krótki.\n")
+                print("Key too short.\n")
                 continue
             save_merged_jarvis_runtime(config.audit_log_path, {"openrouter_api_key": key})
-            print("Zapisano openrouter_api_key w jarvis_runtime_secrets.json\n")
+            print("Saved openrouter_api_key to jarvis_runtime_secrets.json\n")
             continue
 
         if cmd == "/jarvis-set-mcp-key":
             parts = stripped.split(None, 1)
             key = parts[1].strip() if len(parts) > 1 else ""
             if not key:
-                print("Użycie: /jarvis-set-mcp-key <klucz>\n")
+                print("Usage: /jarvis-set-mcp-key <key>\n")
                 continue
             if len(key) < 8:
-                print("Klucz zbyt krótki.\n")
+                print("Key too short.\n")
                 continue
             save_merged_jarvis_runtime(config.audit_log_path, {"mcp_api_key": key})
-            print("Zapisano mcp_api_key w jarvis_runtime_secrets.json\n")
+            print("Saved mcp_api_key to jarvis_runtime_secrets.json\n")
             continue
 
         if cmd in {"/jarvis-limits", "/mcp-limits", "/limits"}:
-            print("jarvis1net — limity MCP:")
+            print("jarvis1net — MCP limits:")
             print(f"  MCP_MAX_TOOL_ROUNDS: {config.mcp_max_tool_rounds}")
             print(f"  MCP_TOOL_RESULT_MAX_CHARS: {config.mcp_tool_result_max_chars}")
             print(f"  MCP_MICROSOFT_TOOL_RESULT_MAX_CHARS: {config.mcp_microsoft_tool_result_max_chars}")
             print(f"  MCP_CHAT_COMPLETION_MAX_TOKENS: {config.mcp_chat_completion_max_tokens}")
             print(f"  MCP_TIMEOUT_SEC: {config.mcp_timeout_sec}")
             print(f"  OPENROUTER_SHOW_COST_ESTIMATE: {1 if config.openrouter_show_cost_estimate else 0}")
-            print(f"  DISPLAY_TIMEZONE: {config.display_timezone or '(brak)'}")
+            print(f"  DISPLAY_TIMEZONE: {config.display_timezone or '(none)'}")
             print()
             continue
 
         if cmd in {"/microsoft-show-settings", "/microsoft-config"}:
             rt = read_settings(config.audit_log_path)
             cid_env = os.getenv("MICROSOFT_CLIENT_ID", "").strip()
-            src = "env" if cid_env else ("plik" if rt.get("client_id") else "brak")
+            src = "env" if cid_env else ("file" if rt.get("client_id") else "none")
             has_cache = Path(config.microsoft_token_cache_path).expanduser().exists()
             ten_env = os.getenv("MICROSOFT_TENANT_ID", "").strip()
             ten_rt = str(rt.get("tenant_id") or "").strip()
             if ten_rt:
-                ten_src = "plik (nadpisuje .env)"
+                ten_src = "file (overrides .env)"
             elif ten_env:
                 ten_src = "env"
             else:
-                ten_src = "domyślnie organizations"
+                ten_src = "default organizations"
             tok_env = bool(os.getenv("MICROSOFT_GRAPH_ACCESS_TOKEN", "").strip())
             tok_rt = bool(
                 isinstance(rt.get("graph_access_token"), str) and str(rt.get("graph_access_token")).strip()
@@ -165,33 +165,33 @@ def main() -> None:
             if tok_env:
                 tok_src = "env MICROSOFT_GRAPH_ACCESS_TOKEN"
             elif tok_rt:
-                tok_src = "plik graph_access_token"
+                tok_src = "file graph_access_token"
             else:
                 tok_src = "MSAL po /microsoft-login"
-            print(f"Client ID: {config.microsoft_client_id or '(brak)'} (źródło: {src})")
-            print(f"Tenant: {config.microsoft_tenant_id} (źródło: {ten_src})")
+            print(f"Client ID: {config.microsoft_client_id or '(none)'} (source: {src})")
+            print(f"Tenant: {config.microsoft_tenant_id} (source: {ten_src})")
             print(f"Scopes: {' '.join(config.microsoft_graph_scopes)}")
-            print(f"Token Graph: {tok_src}")
-            print(f"Ustawienia: {settings_path(config.audit_log_path)}")
-            print(f"Cache tokenów: {'tak' if has_cache else 'nie'}\n")
+            print(f"Graph token: {tok_src}")
+            print(f"Settings file: {settings_path(config.audit_log_path)}")
+            print(f"MSAL token cache: {'yes' if has_cache else 'no'}\n")
             continue
 
         if cmd in {"/microsoft-set-graph-token", "/microsoft-paste-token"}:
             parts = stripped.split(None, 1)
             if len(parts) < 2 or not parts[1].strip():
                 print(
-                    "Użycie: /microsoft-set-graph-token <access_token>\n"
-                    "np. wynik: az account get-access-token --resource https://graph.microsoft.com -o tsv\n"
+                    "Usage: /microsoft-set-graph-token <access_token>\n"
+                    "e.g. output of: az account get-access-token --resource https://graph.microsoft.com -o tsv\n"
                 )
                 continue
             tok = parts[1].strip()
             if tok.casefold().startswith("bearer "):
                 tok = tok[7:].strip()
             if len(tok) < 30:
-                print("Token zbyt krótki.\n")
+                print("Token too short.\n")
                 continue
             save_merged_settings(config.audit_log_path, {"graph_access_token": tok})
-            print("Zapisano graph_access_token (runtime).\n")
+            print("Saved graph_access_token (runtime).\n")
             continue
 
         if cmd in {"/microsoft-clear-runtime", "/microsoft-clear-settings"}:
@@ -201,7 +201,7 @@ def main() -> None:
 
         if cmd in {"/microsoft-login", "/msft-login"}:
             if not config.microsoft_client_id.strip():
-                print("Brak Client ID — użyj /microsoft-set-client <UUID> lub .env\n")
+                print("No Client ID — use /microsoft-set-client <UUID> or .env\n")
                 continue
             try:
 
@@ -210,7 +210,7 @@ def main() -> None:
 
                 print(run_device_code_login(config, notify=_n))
             except Exception as exc:
-                print(f"Błąd logowania Microsoft: {exc}\n")
+                print(f"Microsoft login error: {exc}\n")
             continue
         if cmd in {"/microsoft-logout", "/msft-logout"}:
             save_merged_settings(config.audit_log_path, {"graph_access_token": None})

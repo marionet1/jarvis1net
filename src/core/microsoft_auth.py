@@ -13,17 +13,17 @@ from .types import AgentConfig
 
 
 def _authority(tenant_id: str) -> str:
-    # „common” bywa problematyczne przy device flow + koncie służbowym (dodatkowy krok MSA/nativeclient → invalid_request / response_type).
+    # "common" can be problematic with device flow + work account (extra MSA/nativeclient step → invalid_request / response_type).
     tid = (tenant_id or "organizations").strip() or "organizations"
     return f"https://login.microsoftonline.com/{tid}"
 
 
 def recommended_native_redirect_uri(tenant_id: str) -> str:
     """
-    Jeden redirect URI (Mobile and desktop) — ten sam segment co ``MICROSOFT_TENANT_ID`` / authority.
+    Single redirect URI (Mobile and desktop) — same segment as ``MICROSOFT_TENANT_ID`` / authority.
 
-    Dla kont **służbowych** preferuj ``organizations`` (nie ``common``): przy ``common`` Microsoft
-    bywa drugi krok logowania na ``nativeclient``, który u wielu osób kończy się błędem ``response_type``.
+    For **work** accounts prefer ``organizations`` (not ``common``): with ``common`` Microsoft
+    often adds a second login step on ``nativeclient`` that fails with ``response_type`` for many users.
     """
     tid = (tenant_id or "organizations").strip() or "organizations"
     return f"https://login.microsoftonline.com/{tid}/oauth2/nativeclient"
@@ -43,12 +43,12 @@ _MSAL_SCOPE_BLOCKLIST = frozenset(s.casefold() for s in ("offline_access", "open
 
 
 def _msal_request_scopes(config: AgentConfig) -> list[str]:
-    """Krótkie nazwy delegated Graph (np. User.Read) — tak jak w oficjalnym przykładzie MSAL device flow; MSAL sam dokleja openid/profile/offline_access."""
+    """Short delegated Graph names (e.g. User.Read) like MSAL device flow samples; MSAL adds openid/profile/offline_access."""
     out = [s.strip() for s in _scopes(config) if s.strip() and s.strip().casefold() not in _MSAL_SCOPE_BLOCKLIST]
     if not out:
         raise RuntimeError(
-            "Brak scope Graph po odfiltrowaniu zarezerwowanych (offline_access/openid/profile). "
-            "Ustaw np. User.Read Mail.ReadWrite w /microsoft-set-scopes lub MICROSOFT_GRAPH_SCOPES."
+            "No Graph scopes after filtering reserved (offline_access/openid/profile). "
+            "Set e.g. User.Read Mail.ReadWrite in /microsoft-set-scopes or MICROSOFT_GRAPH_SCOPES."
         )
     return out
 
@@ -113,38 +113,38 @@ def resolve_graph_access_token(config: AgentConfig) -> str | None:
 def run_device_code_login(config: AgentConfig, notify: Callable[[str], None]) -> str:
     """
     Runs full device code flow: notify() gets Microsoft's instruction line (URL + code), then blocks until done.
-    Returns a short Polish summary for the user.
+    Returns a short user-facing summary.
     """
     app, cache = _public_app(config)
     flow = app.initiate_device_flow(scopes=_msal_request_scopes(config))
     if "user_code" not in flow:
         err = flow.get("error_description") or flow.get("error") or json.dumps(flow)
-        raise RuntimeError(f"Nie udało się uruchomić logowania: {err}")
-    notify(str(flow.get("message") or "Otwórz stronę Microsoft i wpisz kod urządzenia."))
+        raise RuntimeError(f"Could not start device login: {err}")
+    notify(str(flow.get("message") or "Open the Microsoft page and enter the device code."))
     vu = flow.get("verification_uri")
     if isinstance(vu, str) and vu.strip():
-        notify("Adres strony logowania urządzenia (Microsoft):\n" + vu.strip())
+        notify("Device login page (Microsoft):\n" + vu.strip())
     vuc = flow.get("verification_uri_complete")
     if isinstance(vuc, str) and vuc.strip():
-        notify("Opcja jednym linkiem (jeśli działa w Twojej przeglądarce):\n" + vuc.strip())
+        notify("One-click link (if your browser supports it):\n" + vuc.strip())
     result = app.acquire_token_by_device_flow(flow)
     _persist_cache(cache, config)
     if not result or "access_token" not in result:
         r = result or {}
-        detail = r.get("error_description") or r.get("error") or "brak access_token"
+        detail = r.get("error_description") or r.get("error") or "no access_token"
         redir = recommended_native_redirect_uri(config.microsoft_tenant_id)
         hint = (
-            " Typowa przyczyna ekranu „phishing” + response_type: tenant „common” na koncie służbowym — "
-            "ustaw /microsoft-set-client <UUID> organizations i w Azure **jeden** redirect Mobile/desktop: "
-            "https://login.microsoftonline.com/organizations/oauth2/nativeclient (usuń common jeśli nie używasz MSA). "
-            f"Aktualny redirect dla Twojego tenantu w agencie: {redir!r}. "
-            "Albo: /microsoft-set-graph-token + az account get-access-token --resource https://graph.microsoft.com -o tsv."
+            " Typical cause of “phishing” + response_type screen: tenant “common” with a work account — "
+            "set /microsoft-set-client <UUID> organizations and in Azure **one** Mobile/desktop redirect: "
+            "https://login.microsoftonline.com/organizations/oauth2/nativeclient (remove common if you do not use MSA). "
+            f"Current redirect for your tenant in the agent: {redir!r}. "
+            "Or: /microsoft-set-graph-token + az account get-access-token --resource https://graph.microsoft.com -o tsv."
         )
         raise RuntimeError(str(detail) + hint)
     claims = result.get("id_token_claims") or {}
     username = claims.get("preferred_username") or claims.get("email")
     who = f" ({username})" if username else ""
-    return f"Połączono z Microsoft Graph{who}. Możesz np. prosić o listę maili z inboxu."
+    return f"Connected to Microsoft Graph{who}. You can e.g. ask for mail from the inbox."
 
 
 def clear_token_cache_file(config: AgentConfig) -> str:
@@ -153,7 +153,7 @@ def clear_token_cache_file(config: AgentConfig) -> str:
     try:
         if path.exists():
             path.unlink()
-            return "Usunięto zapisane tokeny Microsoft (wylogowano z tej instancji agenta)."
-        return "Brak pliku cache — nic do usunięcia."
+            return "Removed saved Microsoft tokens (logged out for this agent instance)."
+        return "No cache file — nothing to remove."
     except OSError as exc:
-        return f"Nie udało się usunąć cache: {exc}"
+        return f"Could not remove cache: {exc}"

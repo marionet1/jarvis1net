@@ -28,12 +28,12 @@ Rules:
 - For Microsoft mailbox/calendar/OneDrive (`microsoft_*` tools), if tools report missing Graph token, tell the user to run **/microsoft-set-client** (paste Azure Client ID) then **/microsoft-login** in Telegram, or set env vars on the agent host.
 - **Microsoft:** go straight to the concrete `microsoft_*` tool the user needs (for example `microsoft_graph_api` or `microsoft_graph_me`). Call **`microsoft_integration_status` only if it still appears in the tool list and you must diagnose missing Graph token** — never as a routine first step before every mail/calendar action.
 - For mail/calendar/OneDrive **create, update, delete, send**, prefer **`microsoft_graph_api`** with the correct Graph `path` and `method` (see Microsoft Graph REST docs); helper tools only cover simple reads/lists.
-- **Calendar (incl. all-day):** for **one named calendar day** (“niedziela”, “26 kwietnia”) use **`microsoft_calendar_events_on_date`** once with **`date=YYYY-MM-DD`** and optional **`time_zone`** (default `Europe/Warsaw`) — **do not** fire many `microsoft_graph_api` GETs with tweaked URLs. For rolling “next weeks” use **`microsoft_calendar_list_events`**. If you must use **`microsoft_graph_api`**, a **single** `GET /me/calendarView` with **`startDateTime`** / **`endDateTime`** (camelCase) is enough; **avoid** `/me/events?$filter=start/dateTime…` for mixed all-day + timed lists. **At most one** successful calendar list per user question unless paging **`@odata.nextLink`**.
+- **Calendar (incl. all-day):** for **one named calendar day** use **`microsoft_calendar_events_on_date`** once with **`date=YYYY-MM-DD`** and optional **`time_zone`** (IANA, e.g. `Europe/Warsaw`) — **do not** fire many `microsoft_graph_api` GETs with tweaked URLs. For rolling “next weeks” use **`microsoft_calendar_list_events`**. If you must use **`microsoft_graph_api`**, a **single** `GET /me/calendarView` with **`startDateTime`** / **`endDateTime`** (camelCase) is enough; **avoid** `/me/events?$filter=start/dateTime…` for mixed all-day + timed lists. **At most one** successful calendar list per user question unless paging **`@odata.nextLink`**.
 - **Calendar day = start only:** when summarizing which **calendar day** an event belongs to, use **`start`** (or tool field **`_jarvis1net_calendar_date`**). **Do not** move an event to the next day because **`end`** crosses midnight — Graph all-day entries often end at **next** day 00:00 while still being “that Tuesday”.
-- **Mail list / “pokaż ostatnie N maili” (bez czytania treści):** używaj GET na wiadomościach z ``$select=id,subject,receivedDateTime,from`` (pole ``from`` zwraca adres/nazwę nadawcy). **Nie** dodawaj ``bodyPreview``, ``body`` ani ``uniqueBody``, dopóki użytkownik wyraźnie nie poprosi o treść / odczytanie konkretnej wiadomości — inaczej wynik narzędzia bywa obcięty i giną kolejne maile. Ustaw ``$top`` równy liczbie prośby (np. dwa ostatnie → ``$top=2``).
+- **Mail list / “show last N messages” (without reading bodies):** use GET on messages with ``$select=id,subject,receivedDateTime,from`` (``from`` gives sender address/name). **Do not** add ``bodyPreview``, ``body``, or ``uniqueBody`` until the user explicitly asks for body content — otherwise tool output is often truncated and later messages are lost. Set ``$top`` to the requested count (e.g. last two → ``$top=2``).
 - To **mark many messages read**, after a GET with `value` of unread messages call **`microsoft_mail_mark_read`** with **all** `value[].id` strings in one `message_ids` array (repeat for next pages). Do **not** answer “all marked” after a single `PATCH` unless `value` had exactly one item or you used `microsoft_mail_mark_read` covering every id.
 - For **bulk** Graph reads (many folders/messages), use small ``$top`` (e.g. 25–50), ``$select`` with only needed fields, and iterate in steps — each tool JSON is **truncated** if too large, so prefer narrow queries over one giant response.
-- **Mailbox bulk work (step-by-step in one reply):** do **not** use deep ``$expand=childFolders`` on large trees in the same round as listing all message bodies. Prefer ``GET /me/mailFolders/inbox/childFolders?$select=id,displayName,unreadItemCount`` **without** expand. For **„oznacz wszystkie nieprzeczytane w tym folderze”** use **`microsoft_mail_mark_folder_read`** with that folder’s `mail_folder_id` (server follows **@odata.nextLink** — **never** use ``$skip`` on message lists; Graph ignores or mishandles it). For several folders with unread counts, call **`microsoft_mail_mark_folder_read` once per folder id** (few tool calls per round).
+- **Mailbox bulk work (step-by-step in one reply):** do **not** use deep ``$expand=childFolders`` on large trees in the same round as listing all message bodies. Prefer ``GET /me/mailFolders/inbox/childFolders?$select=id,displayName,unreadItemCount`` **without** expand. To **mark all unread in that folder** use **`microsoft_mail_mark_folder_read`** with that folder’s `mail_folder_id` (server follows **@odata.nextLink** — **never** use ``$skip`` on message lists; Graph ignores or mishandles it). For several folders with unread counts, call **`microsoft_mail_mark_folder_read` once per folder id** (few tool calls per round).
 - **Never** issue the same tool with the **same arguments** twice in one turn: if a result was truncated, narrow ``$select``/``$top`` or query the **next** folder id from an earlier response instead of repeating the identical GET.
 - **Mark many messages read/unread (or bulk PATCH on messages):** use ``$select=id`` only and ``$top`` at most **20** per GET when you list ids manually; follow **``@odata.nextLink``** only (no ``$skip`` on ``/messages``). Prefer **`microsoft_mail_mark_folder_read`** over hand-paged GETs so no id is missed. One huge GET can be truncated and you lose ids — then you cannot finish the job in one reply.
 - **Mark one message read in Graph:** ``PATCH`` path ``/me/messages/{id}`` or ``/me/mailFolders/{folderId}/messages/{id}`` with JSON body exactly ``{"isRead": true}`` (boolean, key name ``isRead``). Success from the tool is usually ``{"ok": true, "status_code": 204}``. If the user says Outlook still shows unread, you may ``GET`` the same ``/me/messages/{id}?$select=isRead`` and report that JSON; do not claim success without that PATCH result in the tool output.
@@ -41,15 +41,15 @@ Rules:
 
 
 def _mcp_system_message(config: AgentConfig) -> str:
-    """System prompt + opcjonalna strefa czasowa do cytowania czasów z Graph (UTC → lokalna)."""
+    """System prompt + optional IANA timezone for quoting Graph times (UTC → local)."""
     tz = (config.display_timezone or "").strip()
     if not tz:
         return MCP_AGENT_SYSTEM
     return (
         MCP_AGENT_SYSTEM
-        + f"\n- **Strefa czasowa użytkownika (IANA: `{tz}`):** Microsoft Graph zwraca często UTC (końcówka `Z`). "
-        f"Gdy cytujesz lub podsumowujesz daty/czasy maili i kalendarza dla użytkownika, przelicz je na tę strefę "
-        f"i raz napisz, że to czas lokalny ({tz}); format 24h, o ile użytkownik nie prosi inaczej."
+        + f"\n- **User timezone (IANA: `{tz}`):** Microsoft Graph often returns UTC (trailing `Z`). "
+        f"When you quote or summarize mail/calendar times for the user, convert to this zone "
+        f"and state once that times are local ({tz}); 24h format unless the user asks otherwise."
     )
 
 
@@ -57,32 +57,12 @@ def _user_requests_mcp_tool_catalog(text: str) -> bool:
     """Heuristic: user wants the current MCP tool list (not a filesystem path listing)."""
     t = text.casefold()
     needles = (
-        "jakie narz",
-        "jakie tool",
-        "jakie toole",
-        "lista narzed",
-        "lista narzęd",
-        "lista tool",
-        "dostepne narzed",
-        "dostępne narzęd",
-        "ktore narzed",
-        "które narzęd",
-        "co za narzed",
-        "co za narzęd",
-        "pokaz narzed",
-        "pokaż narzęd",
-        "wylistuj narzed",
-        "wylistuj narzęd",
         "what tools",
         "which tools",
         "list tools",
         "tool list",
         "available tools",
         "mcp tools",
-        "narzedzia mcp",
-        "narzędzia mcp",
-        "manifest narzed",
-        "manifest narzęd",
         "manifest tool",
         "mcp_refresh_tool_manifest",
     )
@@ -143,9 +123,9 @@ def _usage_footer_cumulative(
         return ""
     if prompt == 0 and completion == 0:
         return (
-            "\n\n- Tokeny: brak pola usage w odpowiedziach API (OpenRouter czasem nie zwraca usage)."
+            "\n\n- Tokens: no usage field in API responses (OpenRouter sometimes omits usage)."
             + (
-                " Osiągnięto MCP_MAX_TOOL_ROUNDS — ustaw wyższą wartość w .env (np. 24) lub podziel zadanie."
+                " Hit MCP_MAX_TOOL_ROUNDS — raise it in .env (e.g. 24) or split the task."
                 if limit_hit
                 else ""
             )
@@ -237,13 +217,13 @@ def _tool_result_char_cap(name: str, config: AgentConfig) -> int:
 
 
 def _truncate_tool_result_for_context(text: str, max_chars: int) -> str:
-    """Ogranicza JSON z MCP/Graph w kontekście modelu (jedna odpowiedź = jedna wiadomość tool)."""
+    """Clamp MCP/Graph JSON in model context (one tool response = one tool message)."""
     text = text.strip()
     if max_chars <= 0 or len(text) <= max_chars:
         return text
     note = (
-        f"\n\n[_jarvis1net: obcięto wynik narzędzia do {max_chars} znaków (było {len(text)}). "
-        "Dla list maili: $select=id, $top≤20 na stronę, potem PATCH każdego id zanim pobierzesz kolejną stronę.]"
+        f"\n\n[_jarvis1net: tool result truncated to {max_chars} chars (was {len(text)}). "
+        "For mail lists: $select=id, $top≤20 per page, then PATCH each id before fetching the next page.]"
     )
     head = max(500, max_chars - len(note))
     return text[:head] + note
@@ -259,8 +239,8 @@ def _tool_call_signature(name: str, args: dict[str, Any]) -> str:
 
 def _graph_unread_messages_loose_key(name: str, args: dict[str, Any]) -> str | None:
     """
-    Model często powtarza GET .../messages?$filter=isRead eq false zmieniając tylko $top (8 vs 20) —
-    to ta sama lista w tym samym momencie; traktujemy jak jedno zapytanie (do czasu PATCH).
+    The model often repeats GET .../messages?$filter=isRead eq false changing only $top (8 vs 20) —
+    same list at the same time; treat as one query (until PATCH).
     """
     if name != "microsoft_graph_api":
         return None
@@ -405,10 +385,10 @@ def _chat_tool_loop(
         _user_requests_mcp_tool_catalog(user_input) and _manifest_tool_in_schema_list(mcp_tools)
     )
 
-    # W jednej odpowiedzi na użytkownika: identyczne wywołanie (np. ten sam GET Graph) nie idzie drugi raz do MCP —
-    # model często zapętla się, gdy wynik był obcięty lub nie przeczytał listy folderów.
+    # Same tool call (e.g. identical Graph GET) is not sent to MCP twice in one user reply —
+    # avoids loops when output was truncated or folder list was skipped.
     tool_result_cache: dict[str, str] = {}
-    # GET nieprzeczytanych: ten sam folder+filter+strona, inne $top → bez ponownego HTTP; po PATCH generacja rośnie.
+    # Unread GET: same folder+filter+page, different $top → no second HTTP; after PATCH generation bumps.
     graph_read_generation = 0
     graph_unread_soft_cache: dict[str, tuple[str, int]] = {}
     graph_cal_soft_cache: dict[str, str] = {}
@@ -487,8 +467,8 @@ def _chat_tool_loop(
                     if cal_key is not None and cal_key in graph_cal_soft_cache:
                         raw = graph_cal_soft_cache[cal_key]
                         dup_note = (
-                            "\n\n[_jarvis1net: to samo okno kalendarza (granice start/end UTC albo ta sama data+strefa) "
-                            "już było — użyj poprzedniego JSON; nie powtarzaj GET calendarView.]"
+                            "\n\n[_jarvis1net: same calendar window (start/end UTC or same date+zone) "
+                            "already fetched — reuse previous JSON; do not repeat GET calendarView.]"
                         )
                     else:
                         loose = _graph_unread_messages_loose_key(name, args)
@@ -497,9 +477,9 @@ def _chat_tool_loop(
                             if prev is not None and prev[1] == graph_read_generation:
                                 raw = prev[0]
                                 dup_note = (
-                                    "\n\n[_jarvis1net: ponowny GET nieprzeczytanych w tym samym folderze i filtrze "
-                                    "(np. inne $top) — to ta sama lista. Użyj microsoft_mail_mark_read na każde id z value "
-                                    "albo microsoft_mail_mark_folder_read(mail_folder_id). Następna strona: tylko @odata.nextLink, nie $skip.]"
+                                    "\n\n[_jarvis1net: repeat unread GET in same folder+filter "
+                                    "(e.g. different $top) — same list. Use microsoft_mail_mark_read for each id in value "
+                                    "or microsoft_mail_mark_folder_read(mail_folder_id). Next page: @odata.nextLink only, not $skip.]"
                                 )
                             else:
                                 raw = run_mcp_tool(name, args, config)
@@ -508,8 +488,8 @@ def _chat_tool_loop(
                         elif sig in tool_result_cache:
                             raw = tool_result_cache[sig]
                             dup_note = (
-                                "\n\n[_jarvis1net: to samo wywołanie już było — nie powtarzaj. "
-                                "Jeśli brakowało danych (obcięcie), zawęż $select/$top albo użyj id podfolderu z wcześniejszej odpowiedzi childFolders.]"
+                                "\n\n[_jarvis1net: identical call already ran — do not repeat. "
+                                "If data was missing (truncation), narrow $select/$top or use subfolder id from earlier childFolders.]"
                             )
                         else:
                             raw = run_mcp_tool(name, args, config)
@@ -545,14 +525,14 @@ def _chat_tool_loop(
         fr = getattr(choice, "finish_reason", None)
         if fr == "length":
             return (
-                "Model zatrzymał się na limicie długości odpowiedzi (max_tokens) — zwykle przy bardzo długich "
-                "wywołaniach narzędzi lub ogromnym JSON z Graph. Napisz proszę węższe polecenie (np. tylko jeden "
-                "folder / „oznacz przeczytane w controlek@gmail.com”) albo kontynuuj „dalej”. "
-                "Administrator może zwiększyć MCP_CHAT_COMPLETION_MAX_TOKENS lub zmniejszyć zakres list maili."
+                "Model hit the response length limit (max_tokens) — often with very long "
+                "tool calls or huge Graph JSON. Try a narrower request (e.g. one folder / mark read in one address) "
+                "or continue with “more”. "
+                "Admin can raise MCP_CHAT_COMPLETION_MAX_TOKENS or narrow mail list scope."
                 + foot
             )
         return (
-            "Model nie zwrócił treści (pusty content). Spróbuj krótszego polecenia lub podziel zadanie na kroki."
+            "Model returned no text (empty content). Try a shorter prompt or split the task into steps."
             + foot
         )
 
