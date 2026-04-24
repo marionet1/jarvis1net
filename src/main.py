@@ -97,7 +97,9 @@ def main() -> None:
             print(f"  MCP_TOOL_RESULT_MAX_CHARS: {config.mcp_tool_result_max_chars}")
             print(f"  MCP_MICROSOFT_TOOL_RESULT_MAX_CHARS: {config.mcp_microsoft_tool_result_max_chars}")
             print(f"  MCP_CHAT_COMPLETION_MAX_TOKENS: {config.mcp_chat_completion_max_tokens}")
-            print(f"  MCP_TIMEOUT_SEC: {config.mcp_timeout_sec}\n")
+            print(f"  MCP_TIMEOUT_SEC: {config.mcp_timeout_sec}")
+            print(f"  DISPLAY_TIMEZONE: {config.display_timezone or '(brak)'}")
+            print()
             continue
 
         if cmd in {"/microsoft-show-settings", "/microsoft-config"}:

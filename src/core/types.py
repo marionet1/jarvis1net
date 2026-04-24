@@ -25,3 +25,4 @@ class AgentConfig:
     microsoft_tenant_id: str
     microsoft_graph_scopes: list[str]
     microsoft_token_cache_path: str
+    display_timezone: str

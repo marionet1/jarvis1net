@@ -35,6 +35,19 @@ Rules:
 """
 
 
+def _mcp_system_message(config: AgentConfig) -> str:
+    """System prompt + opcjonalna strefa czasowa do cytowania czasów z Graph (UTC → lokalna)."""
+    tz = (config.display_timezone or "").strip()
+    if not tz:
+        return MCP_AGENT_SYSTEM
+    return (
+        MCP_AGENT_SYSTEM
+        + f"\n- **Strefa czasowa użytkownika (IANA: `{tz}`):** Microsoft Graph zwraca często UTC (końcówka `Z`). "
+        f"Gdy cytujesz lub podsumowujesz daty/czasy maili i kalendarza dla użytkownika, przelicz je na tę strefę "
+        f"i raz napisz, że to czas lokalny ({tz}); format 24h, o ile użytkownik nie prosi inaczej."
+    )
+
+
 def _user_requests_mcp_tool_catalog(text: str) -> bool:
     """Heuristic: user wants the current MCP tool list (not a filesystem path listing)."""
     t = text.casefold()
@@ -276,7 +289,7 @@ def _chat_tool_loop(
     )
     model_id = normalize_model_name(model)
     messages: list[dict[str, Any]] = [
-        {"role": "system", "content": MCP_AGENT_SYSTEM},
+        {"role": "system", "content": _mcp_system_message(config)},
         *prior_messages,
         {"role": "user", "content": user_input},
     ]

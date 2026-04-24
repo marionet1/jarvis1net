@@ -25,6 +25,7 @@ DEFAULTS: list[tuple[str, str]] = [
     ("SESSION_CONTEXT_PATH", ""),
     ("TELEGRAM_NOTIFY_ON_START", "1"),
     ("TELEGRAM_CLEAR_SESSION_ON_START", "1"),
+    ("DISPLAY_TIMEZONE", ""),
 ]
 
 

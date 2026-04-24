@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 
@@ -18,6 +19,19 @@ _DEFAULT_TELEGRAM_STARTUP_MESSAGE = (
     "Hej — jarvis1net wystartował po restarcie. "
     "Pamięć rozmowy w tym czacie została wyzerowana; możemy gadać od zera."
 )
+
+
+def _validated_display_timezone(raw: str) -> str:
+    """IANA (np. Europe/Warsaw). Puste = brak — model nie dostaje reguły konwersji z UTC."""
+    name = raw.strip()
+    if not name:
+        return ""
+    try:
+        ZoneInfo(name)
+    except Exception:
+        print(f"jarvis1net: DISPLAY_TIMEZONE={name!r} jest niepoprawne — ignoruję. Użyj np. Europe/Warsaw.")
+        return ""
+    return name
 
 
 def _env_bool(key: str, default: bool) -> bool:
@@ -116,6 +130,8 @@ def load_config() -> AgentConfig:
     else:
         ms_cache = str(Path(audit_log_path).expanduser().resolve().parent / "ms_graph_token_cache.json")
 
+    display_timezone = _validated_display_timezone(os.getenv("DISPLAY_TIMEZONE", "").strip())
+
     return AgentConfig(
         model=os.getenv("MODEL", "o4-mini"),
         openrouter_api_key=os.getenv("OPENROUTER_API_KEY", ""),
@@ -139,4 +155,5 @@ def load_config() -> AgentConfig:
         microsoft_tenant_id=ms_tenant,
         microsoft_graph_scopes=ms_scopes,
         microsoft_token_cache_path=ms_cache,
+        display_timezone=display_timezone,
     )
