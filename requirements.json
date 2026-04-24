@@ -3,6 +3,7 @@
     "python-dotenv",
     "openai",
     "requests",
-    "msal>=1.28.0"
+    "msal>=1.28.0",
+    "mcp>=1.0.0"
   ]
 }

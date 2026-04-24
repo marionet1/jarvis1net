@@ -53,7 +53,7 @@ def main() -> None:
                 print("Usage: /microsoft-set-client <Client-ID> [tenant]\n")
                 continue
             cid = parts[1].strip()
-            tenant = parts[2].strip() if len(parts) > 2 else "organizations"
+            tenant = parts[2].strip() if len(parts) > 2 else "consumers"
             if not validate_client_id(cid):
                 print("Client ID must be a full UUID from Azure.\n")
                 continue
@@ -117,10 +117,13 @@ def main() -> None:
             continue
 
         if cmd == "/jarvis-set-mcp-key":
+            if config.mcp_mode != "http":
+                print("MCP stdio mode (default) — no API key. Set MCP_STDIO_ARGS in .env.\n")
+                continue
             parts = stripped.split(None, 1)
             key = parts[1].strip() if len(parts) > 1 else ""
             if not key:
-                print("Usage: /jarvis-set-mcp-key <key>\n")
+                print("Usage: /jarvis-set-mcp-key <key> (MCP_MODE=http only)\n")
                 continue
             if len(key) < 8:
                 print("Key too short.\n")
@@ -131,6 +134,9 @@ def main() -> None:
 
         if cmd in {"/jarvis-limits", "/mcp-limits", "/limits"}:
             print("jarvis1net — MCP limits:")
+            print(f"  MCP_MODE: {config.mcp_mode}")
+            if config.mcp_mode == "stdio":
+                print(f"  MCP_STDIO: {config.mcp_stdio_command} {' '.join(config.mcp_stdio_args)}")
             print(f"  MCP_MAX_TOOL_ROUNDS: {config.mcp_max_tool_rounds}")
             print(f"  MCP_TOOL_RESULT_MAX_CHARS: {config.mcp_tool_result_max_chars}")
             print(f"  MCP_MICROSOFT_TOOL_RESULT_MAX_CHARS: {config.mcp_microsoft_tool_result_max_chars}")
@@ -153,7 +159,7 @@ def main() -> None:
             elif ten_env:
                 ten_src = "env"
             else:
-                ten_src = "default organizations"
+                ten_src = "default consumers"
             tok_env = bool(os.getenv("MICROSOFT_GRAPH_ACCESS_TOKEN", "").strip())
             tok_rt = bool(
                 isinstance(rt.get("graph_access_token"), str) and str(rt.get("graph_access_token")).strip()

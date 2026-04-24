@@ -1,15 +1,16 @@
-# jarvis1net v0.1
+# jarvis1net
 
-`jarvis1net` is a lightweight personal AI assistant powered by OpenRouter.
-This release is a simple MVP focused on reliability and clean self-hosted setup.
+`jarvis1net` is a lightweight personal AI assistant powered by OpenRouter, designed for a clean self‑hosted stack with optional Telegram and MCP.
+
+**VPS / pełna instrukcja (Docker, struktura katalogów):** zobacz [README w katalogu nadrzędnym (JUMP)](../README.md).
 
 ## What it does
 
 - Conversational replies through OpenRouter (**CLI** `src/main.py` and **Telegram** `src/telegram_bot.py`).
-- Optional **MCP tools** over HTTP when `MCP_API_KEY` is set. The agent sends a **Microsoft Graph** bearer token to MCP as **`X-Graph-Authorization`** when available, so each deployment can use a different Microsoft user.
+- **MCP tools** (default: **stdio** — lokalny `mcp-jarvis1net` jako podproces Node) lub tryb **HTTP** (`MCP_MODE=http` + `MCP_API_KEY`). Dla Microsoft token jest przekazywany: w stdio w argumencie `graph_access_token` przy narzędziach `microsoft_*`, w HTTP w nagłówku `X-Graph-Authorization`.
 - **Short session memory** (per CLI session / per Telegram chat), persisted as JSON next to the audit log.
 - **Startup configuration check**: on Telegram start and in CLI at launch, a compact **OK / incomplete** report covers OpenRouter key, MCP reachability, and Graph token state.
-- **Runtime secrets** (optional): `jarvis_runtime_secrets.json` next to the audit log can hold `openrouter_api_key` and/or `mcp_api_key` written from chat (**`/jarvis-set-openrouter-key`**, **`/jarvis-set-mcp-key`**) or CLI; `load_config()` merges this file **over** `.env` for those keys so you can fix keys without editing `.env` (restart not required for key changes).
+- **Runtime secrets** (optional): `jarvis_runtime_secrets.json` can hold `openrouter_api_key` and (tylko w **`MCP_MODE=http`**) `mcp_api_key` z czatu/CLI. W trybie stdio **`/jarvis-set-mcp-key` nie obowiązuje** (brak klucza API do MCP).
 - **`DISPLAY_TIMEZONE`**: IANA zone (e.g. `Europe/Warsaw`) is injected into the system prompt so the model can quote Graph mail/calendar times in local time.
 - Optional **token + cost footer** on replies when `OPENROUTER_SHOW_COST_ESTIMATE=1` (pricing from OpenRouter `/api/v1/models`, cached ~1 h).
 - Basic **audit** events to a JSONL log.
@@ -18,6 +19,20 @@ This release is a simple MVP focused on reliability and clean self-hosted setup.
 
 - Python 3.12+
 - OpenRouter API key (`OPENROUTER_API_KEY` in `.env` **or** saved via `/jarvis-set-openrouter-key`)
+
+## Docker (pełny stos: agent + MCP w jednym obrazie)
+
+Budowanie i uruchomienie odbywa się z **katalogu nadrzędnego** (tam gdzie leżą równolegle `jarvis1net/`, `mcp-jarvis1net/`, główny `Dockerfile`). Zobacz sekcję *Wdrożenie na VPS* w [README nadrzędnego katalogu](../README.md). Skrót:
+
+```bash
+cp jarvis1net/.env.example .env
+# uzupełnij klucze i tokeny, potem:
+docker compose build && docker compose up -d
+```
+
+Obraz buduje **mcp-jarvis1net** w `/opt/mcp-jarvis1net` i odpala bota `python3 src/telegram_bot.py`. Dane: wolumen `jarvis_data` → `/app/data`.
+
+CLI zamiast Telegrama: `docker compose run --rm jarvis python3 src/main.py`.
 
 ## Quick start
 
@@ -57,7 +72,7 @@ After start, if `TELEGRAM_NOTIFY_ON_START=1`, allowed chats get the configurable
 | `/info` | HTML: all commands + MCP tool list |
 | `/jarvis-config-check` | Re-run startup checks (MCP + Graph + OpenRouter) |
 | `/jarvis-set-openrouter-key …` | Save OpenRouter key to `jarvis_runtime_secrets.json` |
-| `/jarvis-set-mcp-key …` | Save MCP API key to `jarvis_runtime_secrets.json` |
+| `/jarvis-set-mcp-key …` | (tylko `MCP_MODE=http`) zapis `mcp_api_key` |
 | `/jarvis-config-reset` | Clear MS runtime file, runtime secrets file, MSAL cache, **all** session memory (same allowlist guard as `/restart`) |
 | `/restart` | Restart `jarvis1net-telegram` via user `systemctl` (only if `TELEGRAM_ALLOWED_CHAT_IDS` is set and matches); natural phrases **`restart bot`**, **`restart the bot`**, or legacy Polish phrases also work |
 | `/jarvis-limits` | Show MCP round limits, JSON caps, timeouts, `DISPLAY_TIMEZONE`, cost footer flag |
@@ -65,11 +80,12 @@ After start, if `TELEGRAM_NOTIFY_ON_START=1`, allowed chats get the configurable
 
 **Security:** if `TELEGRAM_ALLOWED_CHAT_IDS` is empty, **anyone** with the bot link can chat and use the key-saving commands (bootstrap only). For production, set an allowlist.
 
-## MCP (hosted service)
+## MCP (stdio lub HTTP)
 
-MCP is a **hosted HTTP service**. The agent uses `MCP_SERVER_URL` and `MCP_API_KEY`.
+- **stdio (domyślne)**: `MCP_MODE=stdio` (lub puste), `MCP_STDIO_COMMAND=node`, `MCP_STDIO_ARGS` = JSON `["/ścieżka/do/mcp-jarvis1net/dist/index.js"]` (albo `MCP_STDIO_NODE_SCRIPT`). Proces Node uruchamiany jest w podprocesie; klient MCP w Pythonie łączy się po stdio.
+- **HTTP (legacy)**: `MCP_MODE=http`, `MCP_SERVER_URL`, `MCP_API_KEY`.
 
-When a Graph token is present, the tool **`microsoft_integration_status`** is **removed** from the manifest sent to the model (smaller payloads; use real `microsoft_*` tools instead).
+Gdy mamy token Graph, `microsoft_integration_status` jest usuwany z listy (`filter_mcp_tools_when_graph_token_present`), tak jak wcześniej.
 
 ## Environment variables
 
@@ -78,16 +94,17 @@ See `.env.example`. Highlights:
 - `OPENROUTER_API_KEY`, `MODEL`, `OPENROUTER_SHOW_COST_ESTIMATE`
 - `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOWED_CHAT_IDS`, `TELEGRAM_POLLING_TIMEOUT_SEC`, `TELEGRAM_NOTIFY_ON_START`, `TELEGRAM_CLEAR_SESSION_ON_START`, optional `TELEGRAM_STARTUP_MESSAGE`
 - `AUDIT_LOG_PATH`, `SESSION_CONTEXT_PATH` (optional)
-- `MCP_SERVER_URL`, `MCP_API_KEY`, `MCP_TIMEOUT_SEC`, `MCP_MAX_TOOL_ROUNDS`, result size caps, `MCP_CHAT_COMPLETION_MAX_TOKENS`
+- `MCP_MODE`, `MCP_STDIO_COMMAND`, `MCP_STDIO_ARGS` (lub `MCP_STDIO_NODE_SCRIPT`), `MCP_ALLOWED_ROOTS` — albo `MCP_SERVER_URL` + `MCP_API_KEY` (HTTP)
+- `MCP_TIMEOUT_SEC`, `MCP_MAX_TOOL_ROUNDS`, result size caps, `MCP_CHAT_COMPLETION_MAX_TOKENS`
 - **`DISPLAY_TIMEZONE`** — IANA timezone for Graph time quoting in answers
-- **Microsoft Graph** (optional): agent sends `X-Graph-Authorization` to MCP; no Azure app secret on the agent for device flow.
+- **Microsoft Graph** (optional): w HTTP token idzie w `X-Graph-Authorization` do MCP; w stdio w `graph_access_token` w argumentach narzędzi. Żadnego client secretu urządzenia w repozytorium.
   - **Device code (Telegram/CLI):** set `MICROSOFT_CLIENT_ID` in `.env`, **or** **`/microsoft-set-client <Azure-Client-ID> [tenant]`** (saved to `microsoft_agent_settings.json` next to logs — no restart). Then **`/microsoft-login`** delivers link + code; tokens go to `MICROSOFT_TOKEN_CACHE_PATH` or next to the audit log. **`/microsoft-logout`** clears cache and pasted runtime token. **`/microsoft-clear-runtime`** removes chat-saved Client ID/scopes/token file fields. **`/microsoft-show-settings`** shows effective Client ID, tenant, scopes, redirect URIs, token source.
   - **Static token:** `MICROSOFT_GRAPH_ACCESS_TOKEN` in `.env` overrides cache for quick tests.
   - **Default delegated scopes:** `User.Read Mail.ReadWrite Mail.Send Calendars.ReadWrite Files.ReadWrite.All` — after changing permissions in Azure, run **`/microsoft-logout`** then **`/microsoft-login`** to refresh consent.
 
 ## Microsoft Azure checklist (device code)
 
-1. **Account type** in the app registration must match what you use. **Default:** agent and `/microsoft-set-client <UUID>` (no second argument) use **`organizations`** — fewer device-flow issues than `common`. Personal-only: `/microsoft-set-client <UUID> consumers` and redirect `.../consumers/...`.
+1. **Account type** in the app registration must match what you use. **Default:** agent and `/microsoft-set-client <UUID>` (no second argument) use **`consumers`** (personal MSA) + Azure redirect `.../consumers/oauth2/nativeclient`. **Work/school only:** set `MICROSOFT_TENANT_ID=organizations` or `/microsoft-set-client <UUID> organizations` and redirect `.../organizations/...` (for work accounts this is often easier than `common`).
 2. **Authentication → Allow public client flows:** **Yes**.
 3. **Platform “Mobile and desktop applications”:** register **exactly one** redirect URI matching `MICROSOFT_TENANT_ID` (same as `/microsoft-show-settings`): `https://login.microsoftonline.com/<tenant>/oauth2/nativeclient` where `<tenant>` is `common`, `organizations`, `consumers`, or directory **GUID**. **Do not** register multiple segments at once (`common` + `organizations` + `consumers`) — with `authority=common` Microsoft may redirect to another host with an **incomplete** request and you see **`response_type`** / 404. Work account: agent `organizations` and Azure **only** `.../organizations/oauth2/nativeclient`; personal: `consumers` + only `.../consumers/...`; mixed: `common` + only `.../common/...`.
 4. **Remove** old **Web** redirect to `https://mcp.jarvis1.net/.../oauth/callback` — unused and confuses the flow.
@@ -118,8 +135,7 @@ Ideas worth adding later (no fixed order or deadlines).
 - Document import into knowledge storage (RAG in a later stage).
 - Simple status panel (`healthcheck`, `uptime`, `last error`).
 - Smoke tests for CLI and Telegram.
-- `docker-compose` for fast deployment.
-- Better VPS deployment guide.
+- ~~VPS deployment — zobacz README w katalogu nadrzędnym.~~
 - Change tracking (`CHANGELOG` / release notes).
 
 ### Automation (planned)
@@ -137,8 +153,4 @@ That can work **in principle** once those tools exist and the host is set up cor
 
 - `src/core/` — `config` (includes `load_config` + startup check/reset helpers), `microsoft_agent` (runtime JSON + MSAL), LLM + MCP loop, session memory, shared chat phrases.
 - `src/main.py`, `src/telegram_bot.py` — CLI and Telegram entrypoints.
-- `deploy/` — optional VPS helpers (`patch_jarvis1net_env.py` adds missing `.env` keys; `diag_microsoft_vps.py` prints Graph config hints; `vps_clone_agent_from_github.sh` fresh clone + restore `.env`/logs).
-
-## Project docs
-
-- `RELEASE_NOTES_v0.1.md`
+- `deploy/` — `patch_jarvis1net_env.py` (dopisuje brakujące klucze w `.env`); `diag_microsoft_vps.py` (szybka diagnostyka Microsoft/MSAL, uruchom z katalogu agenta).

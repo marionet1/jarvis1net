@@ -1,4 +1,4 @@
-"""Dynamic MCP tool loading and execution helpers."""
+"""MCP tools: HTTP (legacy) or stdio (Node mcp-jarvis1net)."""
 
 from __future__ import annotations
 
@@ -8,12 +8,19 @@ from typing import Any
 import requests
 
 from .microsoft_agent import resolve_graph_access_token
+from .mcp_stdio_client import get_stdio_client
 from .types import AgentConfig
+
+
+def mcp_can_use_tools(config: AgentConfig) -> bool:
+    if config.mcp_mode == "http":
+        return bool(config.mcp_api_key.strip())
+    return bool(config.mcp_stdio_command.strip()) and bool(config.mcp_stdio_args)
 
 
 def _auth_headers(config: AgentConfig) -> dict[str, str]:
     if not config.mcp_api_key:
-        raise RuntimeError("Missing MCP_API_KEY in .env")
+        raise RuntimeError("Missing MCP_API_KEY in .env (HTTP mode).")
     return {"Authorization": f"Bearer {config.mcp_api_key}"}
 
 
@@ -49,6 +56,8 @@ def mcp_post_json(
 
 
 def mcp_health(config: AgentConfig) -> dict[str, Any]:
+    if config.mcp_mode != "http":
+        return {"ok": True, "mode": "stdio"}
     return mcp_get(config, "/health")
 
 
@@ -67,8 +76,7 @@ def _http_error_payload(exc: requests.HTTPError) -> dict[str, Any]:
     }
 
 
-def load_mcp_tools(config: AgentConfig) -> list[dict[str, Any]]:
-    """Loads OpenAI-style function schemas directly from MCP server manifest."""
+def _load_mcp_tools_http(config: AgentConfig) -> list[dict[str, Any]]:
     data = mcp_get(config, "/v1/tools")
     tools = data.get("tools")
     if not isinstance(tools, list):
@@ -76,14 +84,26 @@ def load_mcp_tools(config: AgentConfig) -> list[dict[str, Any]]:
     return tools
 
 
+def load_mcp_tools(config: AgentConfig) -> list[dict[str, Any]]:
+    """OpenAI-style function schemas from the MCP server."""
+    if config.mcp_mode == "http":
+        if not config.mcp_api_key.strip():
+            raise RuntimeError("MCP HTTP mode requires MCP_API_KEY.")
+        return _load_mcp_tools_http(config)
+    if not mcp_can_use_tools(config):
+        raise RuntimeError("MCP stdio: set MCP_STDIO_ARGS (JSON) or MCP_STDIO_NODE_SCRIPT in .env.")
+    client = get_stdio_client(
+        config.mcp_stdio_command,
+        list(config.mcp_stdio_args),
+        None,
+    )
+    return client.list_tools(float(config.mcp_timeout_sec))
+
+
 def filter_mcp_tools_when_graph_token_present(
     config: AgentConfig, tools: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
-    """When the agent already sends a Graph token, `microsoft_integration_status` is redundant — drop it from the manifest.
-
-    Shrinks the `tools` list on each chat completions call and avoids an empty-`{}` “preamble”
-    before every Microsoft action.
-    """
+    """When the agent already sends a Graph token, `microsoft_integration_status` is redundant — drop it from the manifest."""
     if not resolve_graph_access_token(config):
         return tools
     out: list[dict[str, Any]] = []
@@ -95,8 +115,9 @@ def filter_mcp_tools_when_graph_token_present(
     return out
 
 
-def run_mcp_tool(name: str, arguments: dict[str, Any], config: AgentConfig) -> str:
-    """Runs one MCP tool call via generic /v1/tools/call and returns JSON for role=tool."""
+def _run_mcp_tool_http(
+    name: str, arguments: dict[str, Any], config: AgentConfig
+) -> str:
     try:
         payload = {"name": name, "arguments": arguments or {}}
         extra: dict[str, str] | None = None
@@ -113,3 +134,24 @@ def run_mcp_tool(name: str, arguments: dict[str, Any], config: AgentConfig) -> s
     except Exception as exc:
         return json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False)
 
+
+def run_mcp_tool(name: str, arguments: dict[str, Any], config: AgentConfig) -> str:
+    """Run one tool (HTTP or stdio) and return JSON for role=tool."""
+    if config.mcp_mode == "http":
+        return _run_mcp_tool_http(name, arguments, config)
+    if not mcp_can_use_tools(config):
+        return json.dumps({"ok": False, "error": "MCP stdio is not configured."}, ensure_ascii=False)
+    args = dict(arguments or {})
+    if name.startswith("microsoft_"):
+        token = resolve_graph_access_token(config)
+        if token:
+            args["graph_access_token"] = token
+    try:
+        client = get_stdio_client(
+            config.mcp_stdio_command,
+            list(config.mcp_stdio_args),
+            None,
+        )
+        return client.call_tool(name, args, float(config.mcp_timeout_sec))
+    except Exception as exc:
+        return json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False)

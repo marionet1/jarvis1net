@@ -7,7 +7,12 @@ from urllib.parse import parse_qsl, unquote
 
 from openai import OpenAI
 
-from .mcp_tools import filter_mcp_tools_when_graph_token_present, load_mcp_tools, run_mcp_tool
+from .mcp_tools import (
+    filter_mcp_tools_when_graph_token_present,
+    load_mcp_tools,
+    mcp_can_use_tools,
+    run_mcp_tool,
+)
 from .openrouter_pricing import build_compact_token_usage_footer
 from .session_context import get_session_store
 from .types import AgentConfig
@@ -381,7 +386,7 @@ def _chat_tool_loop(
     except Exception as exc:
         return f"MCP tools manifest error: {exc}"
     if not mcp_tools:
-        return "No MCP tools are available for this API key."
+        return "No MCP tools are available (configure MCP stdio args or HTTP MCP_API_KEY)."
 
     pending_force_manifest = (
         _user_requests_mcp_tool_catalog(user_input) and _manifest_tool_in_schema_list(mcp_tools)
@@ -565,7 +570,7 @@ def get_llm_reply(
             "Missing OPENROUTER_API_KEY in .env. Add it to enable OpenRouter responses."
         )
 
-    if config.mcp_api_key.strip():
+    if mcp_can_use_tools(config):
         store = get_session_store(config.session_context_path)
         state = store.session(session_key)
         prior = state.chat.as_openai_messages()

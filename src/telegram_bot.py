@@ -22,7 +22,11 @@ from core.config import (
 )
 from core.jarvis_runtime_settings import save_merged_jarvis_runtime
 from core.llm import get_llm_reply
-from core.mcp_tools import filter_mcp_tools_when_graph_token_present, load_mcp_tools
+from core.mcp_tools import (
+    filter_mcp_tools_when_graph_token_present,
+    load_mcp_tools,
+    mcp_can_use_tools,
+)
 from core.microsoft_agent import (
     clear_settings_file,
     clear_token_cache_file,
@@ -111,6 +115,11 @@ def _restart_from_chat_allowed(config: AgentConfig, chat_id_s: str) -> bool:
     return bool(config.telegram_allowed_chat_ids) and chat_id_s in config.telegram_allowed_chat_ids
 
 
+def _running_in_docker() -> bool:
+    """Docker creates /.dockerenv in containers; host systemd restart does not apply there."""
+    return Path("/.dockerenv").is_file()
+
+
 def _jarvis_secrets_from_chat_allowed(config: AgentConfig, chat_id_s: str) -> bool:
     """If TELEGRAM_ALLOWED_CHAT_IDS is empty anyone can save keys (bootstrap risk); else whitelist only."""
     if not config.telegram_allowed_chat_ids:
@@ -119,10 +128,18 @@ def _jarvis_secrets_from_chat_allowed(config: AgentConfig, chat_id_s: str) -> bo
 
 
 def _schedule_telegram_self_restart() -> None:
-    """Delayed user systemd restart so Telegram can receive the reply first."""
+    """Delayed restart: Docker = exit process so the container restarts; else user systemd unit."""
 
     def worker() -> None:
         time.sleep(1.5)
+        if _running_in_docker() and os.getenv("JARVIS_NO_DOCKER_EXIT_RESTART", "").strip().lower() not in (
+            "1",
+            "true",
+            "yes",
+        ):
+            # `restart: unless-stopped` in compose brings the service back; systemctl in-container is wrong target.
+            print("jarvis1net: /restart in Docker — exiting process (expect container restart).")
+            os._exit(0)  # noqa: PLR1722 — must not return; whole process must end for Docker restart policy
         try:
             subprocess.run(
                 ["systemctl", "--user", "restart", "jarvis1net-telegram.service"],
@@ -202,18 +219,23 @@ def _commands_info_botfather_style_html() -> str:
 def build_info_html_chunks(config: AgentConfig) -> list[str]:
     """One or more HTML chunks (&lt; 4096 chars each) — commands + MCP tools."""
     cmd_html = _commands_info_botfather_style_html()
+    if config.mcp_mode == "http":
+        mcp_head = f"<i>MCP (HTTP):</i> <code>{html.escape(config.mcp_server_url.strip())}</code>\n\n"
+    else:
+        spec = f"{html.escape(config.mcp_stdio_command)} {' '.join(html.escape(x) for x in config.mcp_stdio_args)}"
+        mcp_head = f"<i>MCP (stdio):</i> <code>{spec}</code>\n\n"
     head = (
         "<b>jarvis1net — /info</b>\n\n"
         + cmd_html
         + "\n<b>MCP tools</b>\n\n"
-        + f"<i>Server:</i> <code>{html.escape(config.mcp_server_url.strip())}</code>\n\n"
+        + mcp_head
     )
     chunks: list[str] = []
     current = head
     mcp_note = ""
 
-    if not config.mcp_api_key.strip():
-        mcp_note = "<b>MCP</b>: <i>no MCP_API_KEY — tool list unavailable.</i>\n"
+    if not mcp_can_use_tools(config):
+        mcp_note = "<b>MCP</b>: <i>not configured (stdio: MCP_STDIO_ARGS, or HTTP: MCP_API_KEY).</i>\n"
         one = (current + mcp_note)[:_INFO_HTML_MAX]
         return [one]
 
@@ -318,6 +340,13 @@ def process_message(
                 ]
             return ["No permission to restart from this chat."]
         _schedule_telegram_self_restart()
+        if _running_in_docker():
+            return [
+                "OK — w ~2 s kończę proces Pythona w kontenerze; Docker powinien włączyć bota z powrotem "
+                "(polityka `restart: unless-stopped`). "
+                "Jeśliby kontener nie wstał, na serwerze: `docker compose up -d` w katalogu stosu. "
+                "Start-up w Telegram, jeśli włączysz: TELEGRAM_NOTIFY_ON_START=1."
+            ]
         return [
             "OK — in about 2 s I will restart the bot process (jarvis1net-telegram). "
             "You should get a startup message shortly (if TELEGRAM_NOTIFY_ON_START=1)."
@@ -364,12 +393,17 @@ def process_message(
         ]
 
     if command_base == "/jarvis-set-mcp-key":
+        if config.mcp_mode != "http":
+            return [
+                "MCP uses stdio (MCP_MODE=stdio) — there is no MCP API key. "
+                "Set MCP_STDIO_ARGS in .env (or use Docker). For remote HTTP MCP, set MCP_MODE=http and MCP_SERVER_URL."
+            ]
         if not _jarvis_secrets_from_chat_allowed(config, chat_id_s):
             return ["No permission (this chat is not in TELEGRAM_ALLOWED_CHAT_IDS)."]
         parts = stripped.split(None, 1)
         key = parts[1].strip() if len(parts) > 1 else ""
         if not key:
-            return ["Usage: /jarvis-set-mcp-key <MCP API key>"]
+            return ["Usage: /jarvis-set-mcp-key <MCP API key> (HTTP mode only)"]
         if len(key) < 8:
             return ["MCP key looks too short."]
         save_merged_jarvis_runtime(config.audit_log_path, {"mcp_api_key": key})
@@ -390,35 +424,43 @@ def process_message(
         return [
             "Reset saved bot data (does not change .env on disk):\n"
             + "\n".join(f"- {x}" for x in lines)
-            + "\n\nNext: /jarvis-set-openrouter-key …, /jarvis-set-mcp-key …, Microsoft: /microsoft-set-client + "
+            + "\n\nNext: /jarvis-set-openrouter-key …, (HTTP) /jarvis-set-mcp-key …, Microsoft: /microsoft-set-client + "
             "/microsoft-login or /microsoft-set-graph-token. Check: /jarvis-config-check."
         ]
 
     if command_base in {"/jarvis-limits", "/mcp-limits", "/limits"}:
-        return [
+        stdio_line = (
+            f"- MCP stdio: {config.mcp_stdio_command} {' '.join(config.mcp_stdio_args)}\n"
+            if config.mcp_mode == "stdio"
+            else f"- MCP HTTP: {config.mcp_server_url}\n"
+        )
+        lim = (
             "jarvis1net — MCP limits for this instance:\n"
-            f"- MCP_MAX_TOOL_ROUNDS (effective): {config.mcp_max_tool_rounds}\n"
-            f"- MCP_TOOL_RESULT_MAX_CHARS: {config.mcp_tool_result_max_chars}\n"
-            f"- MCP_MICROSOFT_TOOL_RESULT_MAX_CHARS (microsoft_*): {config.mcp_microsoft_tool_result_max_chars}\n"
-            f"- MCP_CHAT_COMPLETION_MAX_TOKENS: {config.mcp_chat_completion_max_tokens}\n"
-            f"- MCP_TIMEOUT_SEC: {config.mcp_timeout_sec}\n"
-            f"- OPENROUTER_SHOW_COST_ESTIMATE: {1 if config.openrouter_show_cost_estimate else 0} "
-            "(footer ~USD from /api/v1/models pricing)\n"
-            f"- DISPLAY_TIMEZONE: {config.display_timezone or '(none — model quotes Graph times as UTC/Z)'}\n"
-            f"- .env file: {Path(__file__).resolve().parents[1] / '.env'}\n"
-            "To change: edit .env in the repo root (not src/) and restart the bot."
-        ]
+            f"- MCP_MODE: {config.mcp_mode}\n"
+            + stdio_line
+            + f"- MCP_MAX_TOOL_ROUNDS (effective): {config.mcp_max_tool_rounds}\n"
+            + f"- MCP_TOOL_RESULT_MAX_CHARS: {config.mcp_tool_result_max_chars}\n"
+            + f"- MCP_MICROSOFT_TOOL_RESULT_MAX_CHARS (microsoft_*): {config.mcp_microsoft_tool_result_max_chars}\n"
+            + f"- MCP_CHAT_COMPLETION_MAX_TOKENS: {config.mcp_chat_completion_max_tokens}\n"
+            + f"- MCP_TIMEOUT_SEC: {config.mcp_timeout_sec}\n"
+            + f"- OPENROUTER_SHOW_COST_ESTIMATE: {1 if config.openrouter_show_cost_estimate else 0} "
+            + "(footer ~USD from /api/v1/models pricing)\n"
+            + f"- DISPLAY_TIMEZONE: {config.display_timezone or '(none — model quotes Graph times as UTC/Z)'}\n"
+            + f"- .env file: {Path(__file__).resolve().parents[1] / '.env'}\n"
+            + "To change: edit .env in the repo root (not src/) and restart the bot."
+        )
+        return [lim]
 
     if command_base == "/microsoft-set-client":
         parts = stripped.split()
         if len(parts) < 2:
             return [
                 "Usage: /microsoft-set-client <Application-Client-ID> [tenant]\n"
-                "tenant: e.g. organizations, common, consumers, or directory GUID (default organizations — work accounts).\n"
+                "tenant: e.g. organizations, common, consumers, or directory GUID (default consumers — personal MSA; work: organizations).\n"
                 "In Azure: app registration → public client + device code + Allow public client flows."
             ]
         cid = parts[1].strip()
-        tenant = parts[2].strip() if len(parts) > 2 else "organizations"
+        tenant = parts[2].strip() if len(parts) > 2 else "consumers"
         if not validate_client_id(cid):
             return ["Client ID must be a full UUID (8-4-4-4-12 from Azure Portal)."]
         save_merged_settings(config.audit_log_path, {"client_id": cid, "tenant_id": tenant})
@@ -478,7 +520,7 @@ def process_message(
         elif ten_env:
             ten_src = "MICROSOFT_TENANT_ID in .env"
         else:
-            ten_src = "default organizations (no file and no env)"
+            ten_src = "default consumers (no file and no env)"
         tok_env = bool(os.getenv("MICROSOFT_GRAPH_ACCESS_TOKEN", "").strip())
         tok_rt = bool(
             isinstance(rt.get("graph_access_token"), str) and str(rt.get("graph_access_token")).strip()

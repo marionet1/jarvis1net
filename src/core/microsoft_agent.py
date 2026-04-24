@@ -66,7 +66,7 @@ def validate_client_id(value: str) -> bool:
 # --- MSAL: device flow + token cache -----------------------------------------------------------
 
 def _authority(tenant_id: str) -> str:
-    tid = (tenant_id or "organizations").strip() or "organizations"
+    tid = (tenant_id or "consumers").strip() or "consumers"
     return f"https://login.microsoftonline.com/{tid}"
 
 
@@ -77,7 +77,7 @@ def recommended_native_redirect_uri(tenant_id: str) -> str:
     For **work** accounts prefer ``organizations`` (not ``common``): with ``common`` Microsoft
     often adds a second login step on ``nativeclient`` that fails with ``response_type`` for many users.
     """
-    tid = (tenant_id or "organizations").strip() or "organizations"
+    tid = (tenant_id or "consumers").strip() or "consumers"
     return f"https://login.microsoftonline.com/{tid}/oauth2/nativeclient"
 
 
@@ -185,9 +185,8 @@ def run_device_code_login(config: AgentConfig, notify: Callable[[str], None]) ->
         detail = r.get("error_description") or r.get("error") or "no access_token"
         redir = recommended_native_redirect_uri(config.microsoft_tenant_id)
         hint = (
-            " Typical cause of “phishing” + response_type screen: tenant “common” with a work account — "
-            "set /microsoft-set-client <UUID> organizations and in Azure **one** Mobile/desktop redirect: "
-            "https://login.microsoftonline.com/organizations/oauth2/nativeclient (remove common if you do not use MSA). "
+            " Tenant/redirect mismatch: work account needs organizations + …/organizations/oauth2/nativeclient; "
+            "personal MSA needs consumers + …/consumers/oauth2/nativeclient. "
             f"Current redirect for your tenant in the agent: {redir!r}. "
             "Or: /microsoft-set-graph-token + az account get-access-token --resource https://graph.microsoft.com -o tsv."
         )
