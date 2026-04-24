@@ -1,7 +1,11 @@
+from __future__ import annotations
+
+import html
 import os
 import subprocess
 import threading
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
@@ -10,8 +14,9 @@ import requests
 from core.agent import run_agent_turn
 from core.audit import write_audit_event
 from core.config import load_config
-from core.types import AgentConfig
 from core.llm import get_llm_reply
+from core.mcp_tools import load_mcp_tools
+from core.types import AgentConfig
 from core.microsoft_auth import (
     clear_token_cache_file,
     recommended_native_redirect_uris,
@@ -120,6 +125,106 @@ def _schedule_telegram_self_restart() -> None:
     threading.Thread(target=worker, daemon=True).start()
 
 
+@dataclass(frozen=True)
+class TelegramOut:
+    """Wyjście do Telegrama: zwykły tekst albo HTML (parse_mode)."""
+
+    text: str
+    parse_mode: str | None = None
+
+
+_INFO_HTML_MAX = 3800
+
+
+def _commands_info_pre_table() -> str:
+    rows: list[tuple[str, str]] = [
+        ("Komenda", "Opis"),
+        ("/start, /help", "Pomoc, skrót konfiguracji"),
+        ("/info, /jarvis-info", "Komendy bota + lista narzędzi MCP (HTML)"),
+        ("/restart, /jarvis-restart", "Restart procesu (tylko TELEGRAM_ALLOWED_CHAT_IDS)"),
+        ("restart bota (frazy)", "To samo co /restart — dokładna fraza z listy w kodzie"),
+        ("/jarvis-limits, /limits", "Limity MCP / obcięcie JSON / timeout"),
+        ("clear history (EN)", "Czyści pamięć rozmowy w tym czacie"),
+        ("/microsoft-set-client …", "Client ID Azure + opcjonalnie tenant → plik runtime"),
+        ("/microsoft-set-tenant …", "Tenant (consumers / organizations / …)"),
+        ("/microsoft-set-scopes …", "Lista scope Graph"),
+        ("/microsoft-show-settings", "Podsumowanie MS + redirecty"),
+        ("/microsoft-login", "Logowanie device code (w tle)"),
+        ("/microsoft-logout", "Wylogowanie + cache MSAL"),
+        ("/microsoft-set-graph-token …", "Wklejony access token do Graph"),
+        ("/microsoft-clear-runtime", "Czyści plik runtime ustawień"),
+    ]
+    w = 28
+    lines = [f"{rows[0][0].ljust(w)} │ {rows[0][1]}", "─" * w + "─┼─" + "─" * 42]
+    for a, b in rows[1:]:
+        ca, cb = a.ljust(w), b
+        if len(cb) > 44:
+            cb = cb[:41] + "…"
+        lines.append(f"{ca[:w].ljust(w)} │ {cb}")
+    return "\n".join(lines)
+
+
+def build_info_html_chunks(config: AgentConfig) -> list[str]:
+    """Kilka wiadomości HTML (&lt; 4096 znaków każda) — komendy + narzędzia MCP."""
+    pre_tbl = _commands_info_pre_table()
+    head = (
+        "<b>jarvis1net — /info</b>\n\n"
+        "<b>1) Komendy w Telegramie</b>\n"
+        f"<pre>{html.escape(pre_tbl)}</pre>\n\n"
+        "<b>2) Narzędzia MCP</b>\n"
+        f"<i>Serwer:</i> <code>{html.escape(config.mcp_server_url.strip())}</code>\n\n"
+    )
+    chunks: list[str] = []
+    current = head
+    mcp_note = ""
+
+    if not config.mcp_api_key.strip():
+        mcp_note = "<b>MCP</b>: <i>brak MCP_API_KEY — lista narzędzi niedostępna.</i>\n"
+        one = (current + mcp_note)[:_INFO_HTML_MAX]
+        return [one]
+
+    try:
+        tools = load_mcp_tools(config)
+    except Exception as exc:
+        err = html.escape(str(exc)[:500])
+        one = (current + f"<b>MCP</b>: <i>nie udało się pobrać manifestu:</i>\n<pre>{err}</pre>")[:_INFO_HTML_MAX]
+        return [one]
+
+    sorted_specs = sorted(
+        (t for t in tools if isinstance(t, dict)),
+        key=lambda x: str((x.get("function") or {}).get("name") or ""),
+    )
+    tool_blocks: list[str] = []
+    for spec in sorted_specs:
+        fn = spec.get("function")
+        if not isinstance(fn, dict):
+            continue
+        name = str(fn.get("name") or "").strip()
+        if not name:
+            continue
+        desc = str(fn.get("description") or "").strip().replace("\r\n", "\n").replace("\n", " ")
+        if len(desc) > 380:
+            desc = desc[:377] + "…"
+        if desc:
+            tool_blocks.append(f"<b>{html.escape(name)}</b>\n<i>{html.escape(desc)}</i>\n")
+        else:
+            tool_blocks.append(f"<b>{html.escape(name)}</b>\n")
+
+    if not tool_blocks:
+        current += "<i>(pusty manifest narzędzi)</i>"
+        return [current[:_INFO_HTML_MAX]]
+
+    for block in tool_blocks:
+        if len(current) + len(block) > _INFO_HTML_MAX:
+            chunks.append(current)
+            current = "<b>2) Narzędzia MCP</b> <i>(ciąg dalszy)</i>\n\n" + block
+        else:
+            current += block
+    if current.strip():
+        chunks.append(current)
+    return chunks if chunks else [head[:_INFO_HTML_MAX]]
+
+
 def _chunk_text(text: str, limit: int = 3900) -> list[str]:
     if len(text) <= limit:
         return [text]
@@ -146,12 +251,15 @@ def telegram_request(token: str, method: str, payload: dict[str, Any]) -> dict[s
     return data
 
 
-def send_message(token: str, chat_id: int, text: str) -> None:
+def send_message(token: str, chat_id: int, text: str, *, parse_mode: str | None = None) -> None:
     for part in _chunk_text(text):
+        payload: dict[str, Any] = {"chat_id": chat_id, "text": part}
+        if parse_mode:
+            payload["parse_mode"] = parse_mode
         telegram_request(
             token=token,
             method="sendMessage",
-            payload={"chat_id": chat_id, "text": part},
+            payload=payload,
         )
 
 
@@ -160,7 +268,7 @@ def process_message(
     line: str,
     *,
     mcp_progress: Callable[[str], None] | None = None,
-) -> list[str]:
+) -> list[str | TelegramOut]:
     config = load_config()
     stripped = line.strip()
     lower = stripped.lower()
@@ -193,8 +301,12 @@ def process_message(
             "Szybka zmiana tenantu: /microsoft-set-tenant consumers | organizations | common. "
             "Token z PC: /microsoft-set-graph-token. Szczegóły: /microsoft-show-settings.\n"
             "Limit MCP (rundy narzędzi / obcięcie JSON): /jarvis-limits\n"
-            "Restart procesu bota (tylko czaty z TELEGRAM_ALLOWED_CHAT_IDS): **/restart** albo napisz np. „restart bota”."
+            "Restart procesu bota (tylko czaty z TELEGRAM_ALLOWED_CHAT_IDS): **/restart** albo napisz np. „restart bota”.\n"
+            "Pełna lista komend + narzędzia MCP (ładny układ HTML): **/info**"
         ]
+
+    if command_base in {"/info", "/jarvis-info"}:
+        return [TelegramOut(chunk, "HTML") for chunk in build_info_html_chunks(config)]
 
     if command_base in {"/jarvis-limits", "/mcp-limits", "/limits"}:
         return [
@@ -432,7 +544,10 @@ def run_bot() -> None:
                     mcp_progress=lambda msg: send_message(token, chat_id, msg),
                 )
                 for reply in replies:
-                    send_message(token, chat_id, reply)
+                    if isinstance(reply, TelegramOut):
+                        send_message(token, chat_id, reply.text, parse_mode=reply.parse_mode)
+                    else:
+                        send_message(token, chat_id, reply)
         except KeyboardInterrupt:
             break
         except Exception as exc:
