@@ -131,6 +131,7 @@ def load_config() -> AgentConfig:
         ms_cache = str(Path(audit_log_path).expanduser().resolve().parent / "ms_graph_token_cache.json")
 
     display_timezone = _validated_display_timezone(os.getenv("DISPLAY_TIMEZONE", "").strip())
+    openrouter_show_cost_estimate = _env_bool("OPENROUTER_SHOW_COST_ESTIMATE", True)
 
     return AgentConfig(
         model=os.getenv("MODEL", "o4-mini"),
@@ -149,6 +150,7 @@ def load_config() -> AgentConfig:
         mcp_tool_result_max_chars=mcp_tool_result_max_chars,
         mcp_microsoft_tool_result_max_chars=mcp_microsoft_tool_result_max_chars,
         mcp_chat_completion_max_tokens=mcp_chat_completion_max_tokens,
+        openrouter_show_cost_estimate=openrouter_show_cost_estimate,
         session_context_path=session_context_path,
         microsoft_graph_access_token=graph_token,
         microsoft_client_id=ms_client,

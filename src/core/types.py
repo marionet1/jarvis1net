@@ -19,6 +19,7 @@ class AgentConfig:
     mcp_tool_result_max_chars: int
     mcp_microsoft_tool_result_max_chars: int
     mcp_chat_completion_max_tokens: int
+    openrouter_show_cost_estimate: bool
     session_context_path: str
     microsoft_graph_access_token: str
     microsoft_client_id: str

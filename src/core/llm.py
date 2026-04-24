@@ -8,6 +8,7 @@ from urllib.parse import parse_qsl, unquote
 from openai import OpenAI
 
 from .mcp_tools import filter_mcp_tools_when_graph_token_present, load_mcp_tools, run_mcp_tool
+from .openrouter_pricing import format_openrouter_cost_line
 from .session_context import get_session_store
 from .types import AgentConfig
 
@@ -123,11 +124,21 @@ def _simple_responses_reply(user_input: str, model: str, config: AgentConfig) ->
         return (
             "The intent is unclear. Please specify the goal, for example a file path or directory."
         )
-    foot = _usage_footer_from_responses_api(response)
+    foot = _usage_footer_from_responses_api(
+        response, model_id=normalize_model_name(model), config=config
+    )
     return text + foot if foot else text
 
 
-def _usage_footer_cumulative(prompt: int, completion: int, rounds: int, *, limit_hit: bool = False) -> str:
+def _usage_footer_cumulative(
+    prompt: int,
+    completion: int,
+    rounds: int,
+    *,
+    model_id: str,
+    config: AgentConfig,
+    limit_hit: bool = False,
+) -> str:
     if rounds <= 0:
         return ""
     total = prompt + completion
@@ -140,10 +151,17 @@ def _usage_footer_cumulative(prompt: int, completion: int, rounds: int, *, limit
         )
     if limit_hit:
         base += " Osiągnięto MCP_MAX_TOOL_ROUNDS — ustaw wyższą wartość w .env (np. 24) lub podziel zadanie."
+    if config.openrouter_show_cost_estimate and (prompt > 0 or completion > 0):
+        base += format_openrouter_cost_line(
+            api_key=config.openrouter_api_key,
+            model_id=model_id,
+            prompt_tokens=prompt,
+            completion_tokens=completion,
+        )
     return base
 
 
-def _usage_footer_from_responses_api(response: Any) -> str:
+def _usage_footer_from_responses_api(response: Any, *, model_id: str, config: AgentConfig) -> str:
     u = getattr(response, "usage", None)
     if u is None:
         return ""
@@ -159,7 +177,15 @@ def _usage_footer_from_responses_api(response: Any) -> str:
     total = int(tt) if tt is not None else pt + ct
     if pt == 0 and ct == 0 and total == 0:
         return ""
-    return f"\n\n— Tokeny (ta odpowiedź, API): wejście≈{pt}, wyjście≈{ct}, suma≈{total}."
+    base = f"\n\n— Tokeny (ta odpowiedź, API): wejście≈{pt}, wyjście≈{ct}, suma≈{total}."
+    if config.openrouter_show_cost_estimate:
+        base += format_openrouter_cost_line(
+            api_key=config.openrouter_api_key,
+            model_id=model_id,
+            prompt_tokens=pt,
+            completion_tokens=ct,
+        )
+    return base
 
 
 _MAX_GRAPH_VALUE_ITEMS = 22
@@ -406,7 +432,13 @@ def _chat_tool_loop(
         except Exception as exc:
             return (
                 f"Model call error (chat + tools): {exc}"
-                + _usage_footer_cumulative(usage_prompt, usage_completion, model_rounds)
+                + _usage_footer_cumulative(
+                    usage_prompt,
+                    usage_completion,
+                    model_rounds,
+                    model_id=model_id,
+                    config=config,
+                )
             )
 
         model_rounds += 1
@@ -505,7 +537,9 @@ def _chat_tool_loop(
             continue
 
         text = (msg.content or "").strip()
-        foot = _usage_footer_cumulative(usage_prompt, usage_completion, model_rounds)
+        foot = _usage_footer_cumulative(
+            usage_prompt, usage_completion, model_rounds, model_id=model_id, config=config
+        )
         if text:
             return text + foot
         fr = getattr(choice, "finish_reason", None)
@@ -525,7 +559,14 @@ def _chat_tool_loop(
     return (
         f"Tool round limit exceeded ({max_rounds}). "
         "Split the request into smaller steps or narrow down paths."
-        + _usage_footer_cumulative(usage_prompt, usage_completion, model_rounds, limit_hit=True)
+        + _usage_footer_cumulative(
+            usage_prompt,
+            usage_completion,
+            model_rounds,
+            model_id=model_id,
+            config=config,
+            limit_hit=True,
+        )
     )
 
 

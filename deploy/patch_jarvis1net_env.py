@@ -26,6 +26,7 @@ DEFAULTS: list[tuple[str, str]] = [
     ("TELEGRAM_NOTIFY_ON_START", "1"),
     ("TELEGRAM_CLEAR_SESSION_ON_START", "1"),
     ("DISPLAY_TIMEZONE", ""),
+    ("OPENROUTER_SHOW_COST_ESTIMATE", "1"),
 ]
 
 

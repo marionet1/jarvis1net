@@ -328,6 +328,8 @@ def process_message(
             f"- MCP_MICROSOFT_TOOL_RESULT_MAX_CHARS (wyniki microsoft_*): {config.mcp_microsoft_tool_result_max_chars}\n"
             f"- MCP_CHAT_COMPLETION_MAX_TOKENS: {config.mcp_chat_completion_max_tokens}\n"
             f"- MCP_TIMEOUT_SEC: {config.mcp_timeout_sec}\n"
+            f"- OPENROUTER_SHOW_COST_ESTIMATE: {1 if config.openrouter_show_cost_estimate else 0} "
+            "(stopka ~USD z cennika /api/v1/models)\n"
             f"- DISPLAY_TIMEZONE: {config.display_timezone or '(brak — model cytuje czasy Graph jak w UTC/Z)'}\n"
             f"- Plik .env: {Path(__file__).resolve().parents[1] / '.env'}\n"
             "Zmiana: edytuj .env w katalogu repo (nie src/) i zrestartuj bota."
