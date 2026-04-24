@@ -1,8 +1,9 @@
-"""Microsoft Graph delegated auth on the agent (device code flow + token cache)."""
+"""Microsoft on the agent: JSON runtime settings next to logs + MSAL device flow and token cache."""
 
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -11,9 +12,60 @@ import msal
 
 from .types import AgentConfig
 
+# --- Runtime settings file (microsoft_agent_settings.json) -------------------------------------
+
+_SETTINGS_NAME = "microsoft_agent_settings.json"
+
+_CLIENT_ID_RE = re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+)
+
+
+def settings_path(audit_log_path: str) -> Path:
+    return Path(audit_log_path).expanduser().resolve().parent / _SETTINGS_NAME
+
+
+def read_settings(audit_log_path: str) -> dict[str, Any]:
+    path = settings_path(audit_log_path)
+    if not path.exists():
+        return {}
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def save_merged_settings(audit_log_path: str, patch: dict[str, Any]) -> None:
+    cur = read_settings(audit_log_path)
+    for key, val in patch.items():
+        if val is None:
+            cur.pop(key, None)
+        else:
+            cur[key] = val
+    path = settings_path(audit_log_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(cur, indent=2, sort_keys=True), encoding="utf-8")
+
+
+def clear_settings_file(audit_log_path: str) -> str:
+    path = settings_path(audit_log_path)
+    try:
+        if path.exists():
+            path.unlink()
+            return "Removed Microsoft settings file from chat (microsoft_agent_settings.json)."
+        return "No saved settings file — nothing to remove."
+    except OSError as exc:
+        return f"Could not remove settings file: {exc}"
+
+
+def validate_client_id(value: str) -> bool:
+    return bool(_CLIENT_ID_RE.match(value.strip()))
+
+
+# --- MSAL: device flow + token cache -----------------------------------------------------------
 
 def _authority(tenant_id: str) -> str:
-    # "common" can be problematic with device flow + work account (extra MSA/nativeclient step → invalid_request / response_type).
     tid = (tenant_id or "organizations").strip() or "organizations"
     return f"https://login.microsoftonline.com/{tid}"
 
@@ -38,7 +90,6 @@ def _scopes(config: AgentConfig) -> list[str]:
     return list(config.microsoft_graph_scopes)
 
 
-# Device code + silent flows reject these in the scopes argument (MSAL / STS reserved).
 _MSAL_SCOPE_BLOCKLIST = frozenset(s.casefold() for s in ("offline_access", "openid", "profile"))
 
 

@@ -124,7 +124,7 @@ Ideas worth adding later (no fixed order or deadlines).
 
 ## Source layout
 
-- `src/core/` — `config`, LLM + MCP tool loop, Microsoft auth/runtime, session memory, startup checks, shared chat phrases.
+- `src/core/` — `config` (includes `load_config` + startup check/reset helpers), `microsoft_agent` (runtime JSON + MSAL), LLM + MCP loop, session memory, shared chat phrases.
 - `src/main.py`, `src/telegram_bot.py` — CLI and Telegram entrypoints.
 - `deploy/` — optional VPS helpers (`patch_jarvis1net_env.py` adds missing `.env` keys; `diag_microsoft_vps.py` prints Graph config hints; `vps_clone_agent_from_github.sh` fresh clone + restore `.env`/logs).
 

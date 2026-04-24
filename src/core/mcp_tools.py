@@ -7,7 +7,7 @@ from typing import Any
 
 import requests
 
-from .microsoft_auth import resolve_graph_access_token
+from .microsoft_agent import resolve_graph_access_token
 from .types import AgentConfig
 
 

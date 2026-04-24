@@ -13,30 +13,28 @@ import requests
 
 from core.audit import write_audit_event
 from core.chat_phrases import CLEAR_HISTORY_PHRASES
-from core.config import load_config
-from core.llm import get_llm_reply
-from core.mcp_tools import filter_mcp_tools_when_graph_token_present, load_mcp_tools
-from core.types import AgentConfig
-from core.microsoft_auth import (
-    clear_token_cache_file,
-    recommended_native_redirect_uris,
-    run_device_code_login,
+from core.config import (
+    StartupCheckResult,
+    format_startup_report_plain,
+    load_config,
+    reset_runtime_agent_state,
+    run_startup_checks,
 )
 from core.jarvis_runtime_settings import save_merged_jarvis_runtime
-from core.microsoft_runtime_settings import (
+from core.llm import get_llm_reply
+from core.mcp_tools import filter_mcp_tools_when_graph_token_present, load_mcp_tools
+from core.microsoft_agent import (
     clear_settings_file,
+    clear_token_cache_file,
     read_settings,
+    recommended_native_redirect_uris,
+    run_device_code_login,
     save_merged_settings,
     settings_path,
     validate_client_id,
 )
 from core.session_context import get_session_store
-from core.startup_config import (
-    StartupCheckResult,
-    format_startup_report_plain,
-    reset_runtime_agent_state,
-    run_startup_checks,
-)
+from core.types import AgentConfig
 
 
 def _looks_like_telegram_chat_key(key: str) -> bool:
