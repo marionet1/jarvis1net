@@ -1,8 +1,8 @@
 import os
 from pathlib import Path
 
-from core.agent import run_agent_turn
 from core.audit import write_audit_event
+from core.chat_phrases import CLEAR_HISTORY_PHRASES
 from core.config import load_config
 from core.llm import get_llm_reply
 from core.microsoft_auth import clear_token_cache_file, run_device_code_login
@@ -16,16 +16,6 @@ from core.microsoft_runtime_settings import (
 from core.jarvis_runtime_settings import save_merged_jarvis_runtime
 from core.session_context import get_session_store
 from core.startup_config import format_startup_report_plain, reset_runtime_agent_state, run_startup_checks
-
-_CLEAR_HISTORY_PHRASES = frozenset(
-    {
-        "clear history",
-        "clear chat history",
-        "reset chat",
-        "start over",
-    }
-)
-
 
 def main() -> None:
     print("jarvis1net v0.1 — type naturally. Use /exit to quit. Type 'clear history' to reset chat memory.")
@@ -218,17 +208,16 @@ def main() -> None:
             print()
             continue
 
-        if low in _CLEAR_HISTORY_PHRASES:
+        if low in CLEAR_HISTORY_PHRASES:
             st = get_session_store(config.session_context_path)
             st.clear_key("cli")
             st.save()
             print("\nCLI chat history cleared.\n")
             continue
 
-        response = run_agent_turn(line, config)
         llm_text = get_llm_reply(
             user_input=line,
-            model=response.selected_model,
+            model=config.model,
             config=config,
             session_key="cli",
             before_tool_round=lambda msg: print(f"\n{msg}\n"),
@@ -237,7 +226,7 @@ def main() -> None:
             log_path=config.audit_log_path,
             event_type="chat_response",
             payload={
-                "model": response.selected_model,
+                "model": config.model,
                 "trigger": line,
             },
         )

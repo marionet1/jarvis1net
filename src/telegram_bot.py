@@ -11,8 +11,8 @@ from typing import Any, Callable
 
 import requests
 
-from core.agent import run_agent_turn
 from core.audit import write_audit_event
+from core.chat_phrases import CLEAR_HISTORY_PHRASES
 from core.config import load_config
 from core.llm import get_llm_reply
 from core.mcp_tools import filter_mcp_tools_when_graph_token_present, load_mcp_tools
@@ -94,17 +94,6 @@ def run_telegram_startup_hooks(
         except Exception as exc:
             print(f"jarvis1net: config report to chat_id={cid_s} failed: {exc}")
 
-
-# Natural phrases that clear chat memory (without slash commands).
-_CLEAR_HISTORY_PHRASES = frozenset(
-    {
-        "clear history",
-        "clear chat history",
-        "reset chat",
-        "start over",
-        "clear conversation",
-    }
-)
 
 # Exact message text (no slash) — avoids accidental “restart” inside a sentence.
 _RESTART_BOT_PHRASES = frozenset(
@@ -581,16 +570,15 @@ def process_message(
         save_merged_settings(cfg.audit_log_path, {"graph_access_token": None})
         return [clear_token_cache_file(cfg)]
 
-    if lower in _CLEAR_HISTORY_PHRASES:
+    if lower in CLEAR_HISTORY_PHRASES:
         store = get_session_store(config.session_context_path)
         store.clear_key(str(chat_id))
         store.save()
         return ["OK — chat history for this conversation has been cleared."]
 
-    response = run_agent_turn(line, config)
     llm_text = get_llm_reply(
         user_input=line,
-        model=response.selected_model,
+        model=config.model,
         config=config,
         session_key=str(chat_id),
         before_tool_round=mcp_progress,
@@ -601,7 +589,7 @@ def process_message(
         payload={
             "source": "telegram",
             "chat_id": chat_id,
-            "model": response.selected_model,
+            "model": config.model,
             "trigger": line,
         },
     )
