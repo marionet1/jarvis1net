@@ -22,6 +22,7 @@ from core.microsoft_auth import (
     recommended_native_redirect_uris,
     run_device_code_login,
 )
+from core.jarvis_runtime_settings import save_merged_jarvis_runtime
 from core.microsoft_runtime_settings import (
     clear_settings_file,
     read_settings,
@@ -121,6 +122,13 @@ def _restart_from_chat_allowed(config: AgentConfig, chat_id_s: str) -> bool:
     return bool(config.telegram_allowed_chat_ids) and chat_id_s in config.telegram_allowed_chat_ids
 
 
+def _jarvis_secrets_from_chat_allowed(config: AgentConfig, chat_id_s: str) -> bool:
+    """Gdy brak TELEGRAM_ALLOWED_CHAT_IDS — każdy może zapisać klucze (bootstrap, ryzyko); inaczej tylko whitelist."""
+    if not config.telegram_allowed_chat_ids:
+        return True
+    return chat_id_s in config.telegram_allowed_chat_ids
+
+
 def _schedule_telegram_self_restart() -> None:
     """Opóźniony restart usługi user systemd (żeby zdążyć wysłać odpowiedź na Telegram)."""
 
@@ -175,8 +183,10 @@ def _commands_info_botfather_style_html() -> str:
         _cmd_line("/limits", "Alias /jarvis-limits"),
         _cmd_line("/jarvis-config-check", "Sprawdza .env + MCP + Graph (to samo co po restarcie)"),
         _cmd_line("/config-check", "Alias /jarvis-config-check"),
-        _cmd_line("/jarvis-config-reset", "Czyści runtime MS + cache MSAL + pamięć czatu (jak nowy agent)"),
+        _cmd_line("/jarvis-config-reset", "Czyści runtime MS + klucze z czatu + cache MSAL + pamięć czatu"),
         _cmd_line("/config-reset", "Alias /jarvis-config-reset"),
+        _cmd_line("/jarvis-set-openrouter-key", "Zapisuje OPENROUTER z czatu do pliku obok logów"),
+        _cmd_line("/jarvis-set-mcp-key", "Zapisuje MCP_API_KEY z czatu do pliku obok logów"),
         "\n",
         "<b>Pamięć rozmowy</b>\n\n",
         _cmd_line("clear history", "Czyści kontekst (też: clear chat history, reset chat, start over, clear conversation)"),
@@ -333,8 +343,8 @@ def process_message(
             "Szybka zmiana tenantu: /microsoft-set-tenant consumers | organizations | common. "
             "Token z PC: /microsoft-set-graph-token. Szczegóły: /microsoft-show-settings.\n"
             "Limit MCP (rundy narzędzi / obcięcie JSON): /jarvis-limits\n"
-            "Sprawdzenie konfiguracji: **/jarvis-config-check**. Reset runtime (bez .env): **/jarvis-config-reset** "
-            "(tylko zaufane czaty jak /restart).\n"
+            "Klucze z czatu (ryzyko wycieku): **/jarvis-set-openrouter-key** …, **/jarvis-set-mcp-key** …. "
+            "Sprawdzenie: **/jarvis-config-check**. Reset zapisów bota: **/jarvis-config-reset** (jak /restart).\n"
             "Restart procesu bota (tylko czaty z TELEGRAM_ALLOWED_CHAT_IDS): **/restart** albo napisz np. „restart bota”.\n"
             "Pełna lista komend + narzędzia MCP (ładny układ HTML): **/info**"
         ]
@@ -346,6 +356,36 @@ def process_message(
         chk = run_startup_checks(config)
         return [format_startup_report_plain(chk, title="Konfiguracja jarvis1net (na żądanie)")]
 
+    if command_base == "/jarvis-set-openrouter-key":
+        if not _jarvis_secrets_from_chat_allowed(config, chat_id_s):
+            return ["Brak uprawnień (ten chat nie jest na liście TELEGRAM_ALLOWED_CHAT_IDS)."]
+        parts = stripped.split(None, 1)
+        key = parts[1].strip() if len(parts) > 1 else ""
+        if not key:
+            return ["Użycie: /jarvis-set-openrouter-key <klucz z https://openrouter.ai/keys>"]
+        if len(key) < 12:
+            return ["Klucz wygląda na zbyt krótki."]
+        save_merged_jarvis_runtime(config.audit_log_path, {"openrouter_api_key": key})
+        return [
+            "Zapisano OpenRouter w jarvis_runtime_secrets.json (obok logów). "
+            "Od następnej wiadomości używany jest nowy klucz (restart niepotrzebny). /jarvis-config-check — podgląd."
+        ]
+
+    if command_base == "/jarvis-set-mcp-key":
+        if not _jarvis_secrets_from_chat_allowed(config, chat_id_s):
+            return ["Brak uprawnień (ten chat nie jest na liście TELEGRAM_ALLOWED_CHAT_IDS)."]
+        parts = stripped.split(None, 1)
+        key = parts[1].strip() if len(parts) > 1 else ""
+        if not key:
+            return ["Użycie: /jarvis-set-mcp-key <klucz MCP>"]
+        if len(key) < 8:
+            return ["Klucz MCP wygląda na zbyt krótki."]
+        save_merged_jarvis_runtime(config.audit_log_path, {"mcp_api_key": key})
+        return [
+            "Zapisano MCP_API_KEY w jarvis_runtime_secrets.json. "
+            "Od następnej wiadomości obowiązuje (restart niepotrzebny). /jarvis-config-check — podgląd."
+        ]
+
     if command_base in {"/jarvis-config-reset", "/config-reset"}:
         if not _restart_from_chat_allowed(config, chat_id_s):
             if not config.telegram_allowed_chat_ids:
@@ -356,11 +396,10 @@ def process_message(
             return ["Brak uprawnień do resetu z tego czatu."]
         lines = reset_runtime_agent_state(config)
         return [
-            "Wykonano reset runtime agenta (nie rusza pliku .env):\n"
+            "Wykonano reset zapisów bota (nie zmienia .env na dysku):\n"
             + "\n".join(f"- {x}" for x in lines)
-            + "\n\nDalej: uzupełnij OPENROUTER_API_KEY / MCP_API_KEY w .env (jeśli trzeba), "
-            "Microsoft: /microsoft-set-client + /microsoft-login lub /microsoft-set-graph-token. "
-            "Potem napisz zwykłą wiadomość albo /jarvis-config-check."
+            + "\n\nDalej: /jarvis-set-openrouter-key …, /jarvis-set-mcp-key …, Microsoft: /microsoft-set-client + "
+            "/microsoft-login lub /microsoft-set-graph-token. Sprawdź: /jarvis-config-check."
         ]
 
     if command_base in {"/jarvis-limits", "/mcp-limits", "/limits"}:

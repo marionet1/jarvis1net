@@ -13,6 +13,7 @@ from core.microsoft_runtime_settings import (
     settings_path,
     validate_client_id,
 )
+from core.jarvis_runtime_settings import save_merged_jarvis_runtime
 from core.session_context import get_session_store
 from core.startup_config import format_startup_report_plain, reset_runtime_agent_state, run_startup_checks
 
@@ -104,6 +105,32 @@ def main() -> None:
             for msg in reset_runtime_agent_state(config):
                 print(msg)
             print()
+            continue
+
+        if cmd == "/jarvis-set-openrouter-key":
+            parts = stripped.split(None, 1)
+            key = parts[1].strip() if len(parts) > 1 else ""
+            if not key:
+                print("Użycie: /jarvis-set-openrouter-key <klucz>\n")
+                continue
+            if len(key) < 12:
+                print("Klucz zbyt krótki.\n")
+                continue
+            save_merged_jarvis_runtime(config.audit_log_path, {"openrouter_api_key": key})
+            print("Zapisano openrouter_api_key w jarvis_runtime_secrets.json\n")
+            continue
+
+        if cmd == "/jarvis-set-mcp-key":
+            parts = stripped.split(None, 1)
+            key = parts[1].strip() if len(parts) > 1 else ""
+            if not key:
+                print("Użycie: /jarvis-set-mcp-key <klucz>\n")
+                continue
+            if len(key) < 8:
+                print("Klucz zbyt krótki.\n")
+                continue
+            save_merged_jarvis_runtime(config.audit_log_path, {"mcp_api_key": key})
+            print("Zapisano mcp_api_key w jarvis_runtime_secrets.json\n")
             continue
 
         if cmd in {"/jarvis-limits", "/mcp-limits", "/limits"}:

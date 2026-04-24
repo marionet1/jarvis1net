@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from .jarvis_runtime_settings import clear_jarvis_runtime_file
 from .mcp_tools import mcp_health
 from .microsoft_auth import clear_token_cache_file, resolve_graph_access_token
 from .microsoft_runtime_settings import clear_settings_file
@@ -13,85 +14,97 @@ from .types import AgentConfig
 
 @dataclass
 class StartupCheckResult:
-    """Wynik walidacji — `blocking` musi być puste, żeby uznać konfigurację za gotową do pracy z LLM."""
+    """`blocking` puste = można gadać z LLM. `mcp_summary` / `graph_summary` — krótki podgląd do raportu OK."""
 
     ok: bool
+    mcp_summary: str = ""
+    graph_summary: str = ""
     blocking: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
-    ok_notes: list[str] = field(default_factory=list)
 
 
 def run_startup_checks(config: AgentConfig) -> StartupCheckResult:
     blocking: list[str] = []
     warnings: list[str] = []
-    ok_notes: list[str] = []
-
-    if not config.openrouter_api_key.strip():
-        blocking.append(
-            "OPENROUTER_API_KEY — brak w .env. Weź klucz z https://openrouter.ai/keys , dopisz do pliku .env obok repo, restart bota."
-        )
 
     if not config.mcp_api_key.strip():
-        warnings.append(
-            "MCP_API_KEY puste — odpowiedzi bez narzędzi MCP (tylko tryb prosty). Dopisz klucz MCP i zrestartuj, jeśli chcesz pliki / shell / Microsoft przez MCP."
-        )
+        mcp_summary = "wyłączone (brak MCP_API_KEY)"
     else:
         try:
             mcp_health(config)
-            ok_notes.append(f"MCP ({config.mcp_server_url}): /health OK")
+            mcp_summary = f"{config.mcp_server_url} — OK"
         except Exception as exc:
+            mcp_summary = f"{config.mcp_server_url} — błąd ({type(exc).__name__})"
             warnings.append(
-                f"MCP nie odpowiada lub odrzuca klucz: {type(exc).__name__}: {str(exc)[:220]}. "
-                "Sprawdź MCP_SERVER_URL, MCP_API_KEY, sieć."
+                f"MCP: {str(exc)[:200]}. Wklej poprawny klucz: /jarvis-set-mcp-key <klucz>"
             )
 
     tok = resolve_graph_access_token(config)
     if tok:
-        ok_notes.append("Microsoft Graph: token dostępny (env / plik runtime / cache MSAL).")
+        graph_summary = "OK"
     elif not config.microsoft_client_id.strip():
+        graph_summary = "brak"
         warnings.append(
-            "Microsoft Graph: brak tokenu i brak Client ID (MICROSOFT_CLIENT_ID lub /microsoft-set-client). "
-            "Narzędzia microsoft_* w MCP nie zadziałają do czasu logowania."
+            "Graph: brak tokenu i Client ID — /microsoft-set-client <UUID> potem /microsoft-login "
+            "albo /microsoft-set-graph-token"
         )
     else:
-        ok_notes.append("Microsoft Graph: Client ID jest — użyj /microsoft-login (device code) albo /microsoft-set-graph-token.")
+        graph_summary = "czeka na logowanie (/microsoft-login)"
+
+    if not config.openrouter_api_key.strip():
+        blocking.append(
+            "OPENROUTER_API_KEY — brak. W czacie: /jarvis-set-openrouter-key <klucz> (zapis obok logów; wyciek na kanale możliwy)."
+        )
 
     if not config.telegram_allowed_chat_ids:
         warnings.append(
-            "TELEGRAM_ALLOWED_CHAT_IDS puste — każdy znający link do bota może pisać; dla produkcji ustaw listę chat_id."
+            "TELEGRAM_ALLOWED_CHAT_IDS puste — każdy z linkiem może pisać; produkcja: ustaw listę chat_id w .env."
         )
 
-    return StartupCheckResult(ok=len(blocking) == 0, blocking=blocking, warnings=warnings, ok_notes=ok_notes)
+    return StartupCheckResult(
+        ok=len(blocking) == 0,
+        mcp_summary=mcp_summary,
+        graph_summary=graph_summary,
+        blocking=blocking,
+        warnings=warnings,
+    )
 
 
 def format_startup_report_plain(result: StartupCheckResult, *, title: str = "Konfiguracja jarvis1net") -> str:
-    """Tekst do Telegrama / logów (bez HTML)."""
-    lines = [title, ""]
+    """Krótki tekst do Telegrama / logów."""
     if result.ok:
-        lines.append("Stan: OK — działamy dalej.")
-        for n in result.ok_notes:
-            lines.append(f"- {n}")
-    else:
-        lines.append("Stan: DO UZUPEŁNIENIA — napraw poniższe, potem zrestartuj bota (lub edytuj .env i /restart):")
-        for b in result.blocking:
-            lines.append(f"- {b}")
+        lines = [
+            title,
+            "",
+            "Konfiguracja OK.",
+            f"MCP: {result.mcp_summary}",
+            f"Microsoft Graph: {result.graph_summary}",
+        ]
+        for w in result.warnings:
+            lines.append(f"(uwaga) {w}")
+        return "\n".join(lines)
+
+    lines = [title, "", "Konfiguracja niepełna — dopisz brakujące:"]
+    for b in result.blocking:
+        lines.append(f"- {b}")
     for w in result.warnings:
-        lines.append(f"- (uwaga) {w}")
+        lines.append(f"- {w}")
     lines.append("")
     lines.append(
-        "Sekrety najlepiej wpisz w .env na serwerze (SSH), nie na publicznym czacie. "
-        "Microsoft (bez sekretu aplikacji): /microsoft-set-client … + /microsoft-login."
+        "Z czatu (świadomie ryzykowne): /jarvis-set-openrouter-key …, /jarvis-set-mcp-key …; "
+        "Microsoft: /microsoft-set-client + /microsoft-login lub /microsoft-set-graph-token. "
+        "Wyczyść zapisane dane bota: /jarvis-config-reset."
     )
     return "\n".join(lines)
 
 
 def reset_runtime_agent_state(config: AgentConfig) -> list[str]:
     """
-    Czyści runtime zapisany z czatu + cache MSAL + pamięć rozmów. Nie usuwa .env.
-    Pełny „factory reset” agenta w sensie danych lokalnych obok logów.
+    Czyści runtime z czatu + cache MSAL + pamięć rozmów + jarvis_runtime_secrets.json. Nie usuwa .env.
     """
     out: list[str] = []
     out.append(clear_settings_file(config.audit_log_path))
+    out.append(clear_jarvis_runtime_file(config.audit_log_path))
     out.append(clear_token_cache_file(config))
     store = get_session_store(config.session_context_path)
     store.clear_all_sessions()

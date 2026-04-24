@@ -4,6 +4,7 @@ from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 
+from .jarvis_runtime_settings import read_jarvis_runtime
 from .microsoft_runtime_settings import read_settings
 from .types import AgentConfig
 
@@ -133,9 +134,19 @@ def load_config() -> AgentConfig:
     display_timezone = _validated_display_timezone(os.getenv("DISPLAY_TIMEZONE", "").strip())
     openrouter_show_cost_estimate = _env_bool("OPENROUTER_SHOW_COST_ESTIMATE", True)
 
+    openrouter_key = os.getenv("OPENROUTER_API_KEY", "").strip()
+    mcp_key = os.getenv("MCP_API_KEY", "").strip()
+    jrt = read_jarvis_runtime(audit_log_path)
+    j_or = jrt.get("openrouter_api_key")
+    if isinstance(j_or, str) and j_or.strip():
+        openrouter_key = j_or.strip()
+    j_mcp = jrt.get("mcp_api_key")
+    if isinstance(j_mcp, str) and j_mcp.strip():
+        mcp_key = j_mcp.strip()
+
     return AgentConfig(
         model=os.getenv("MODEL", "o4-mini"),
-        openrouter_api_key=os.getenv("OPENROUTER_API_KEY", ""),
+        openrouter_api_key=openrouter_key,
         telegram_bot_token=os.getenv("TELEGRAM_BOT_TOKEN", "").strip(),
         telegram_allowed_chat_ids=telegram_allowed_ids,
         telegram_notify_on_start=telegram_notify_on_start,
@@ -144,7 +155,7 @@ def load_config() -> AgentConfig:
         telegram_polling_timeout_sec=telegram_polling_timeout,
         audit_log_path=audit_log_path,
         mcp_server_url=os.getenv("MCP_SERVER_URL", "https://mcp.jarvis1.net").strip().rstrip("/"),
-        mcp_api_key=os.getenv("MCP_API_KEY", "").strip(),
+        mcp_api_key=mcp_key,
         mcp_timeout_sec=mcp_timeout,
         mcp_max_tool_rounds=mcp_max_tool_rounds,
         mcp_tool_result_max_chars=mcp_tool_result_max_chars,
