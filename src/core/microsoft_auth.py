@@ -17,10 +17,28 @@ def _authority(tenant_id: str) -> str:
     return f"https://login.microsoftonline.com/{tid}"
 
 
-def recommended_native_redirect_uri(tenant_id: str) -> str:
-    """Must match Azure → Authentication → Mobile and desktop redirect URI (same segment as authority)."""
+def recommended_native_redirect_uris(tenant_id: str) -> list[str]:
+    """
+    Redirect URIs to register under *Mobile and desktop applications* in Azure.
+
+    When authority uses ``common``, Microsoft may finish the browser step on
+    ``/common/``, ``/organizations/``, or ``/consumers/`` nativeclient depending on
+    account type — only having ``/common/`` registered causes ``invalid_request``
+    on the other hosts.
+    """
     tid = (tenant_id or "common").strip() or "common"
-    return f"https://login.microsoftonline.com/{tid}/oauth2/nativeclient"
+    if tid.casefold() == "common":
+        return [
+            "https://login.microsoftonline.com/common/oauth2/nativeclient",
+            "https://login.microsoftonline.com/organizations/oauth2/nativeclient",
+            "https://login.microsoftonline.com/consumers/oauth2/nativeclient",
+        ]
+    return [f"https://login.microsoftonline.com/{tid}/oauth2/nativeclient"]
+
+
+def recommended_native_redirect_uri(tenant_id: str) -> str:
+    """First (primary) native redirect; prefer registering all from `recommended_native_redirect_uris`."""
+    return recommended_native_redirect_uris(tenant_id)[0]
 
 
 def _scopes(config: AgentConfig) -> list[str]:
@@ -118,10 +136,11 @@ def run_device_code_login(config: AgentConfig, notify: Callable[[str], None]) ->
     if not result or "access_token" not in result:
         r = result or {}
         detail = r.get("error_description") or r.get("error") or "brak access_token"
-        redir = recommended_native_redirect_uri(config.microsoft_tenant_id)
+        uris = recommended_native_redirect_uris(config.microsoft_tenant_id)
         hint = (
-            " Jeśli w przeglądarce było nativeclient + invalid_request: w Azure dodaj redirect "
-            f"{redir!r} (Mobile and desktop) — segment musi być taki sam jak tenant w agencie."
+            " Jeśli w przeglądarce było nativeclient + invalid_request: w Azure (Mobile and desktop) "
+            "zarejestruj WSZYSTKIE poniższe URI (osobne wpisy): "
+            + " | ".join(uris)
         )
         raise RuntimeError(str(detail) + hint)
     claims = result.get("id_token_claims") or {}

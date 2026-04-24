@@ -63,12 +63,13 @@ To request an API key, send a DM on GitHub: [github.com/marionet1](https://githu
 
 1. **Typ konta** w rejestracji: zgodny z tym, czego używasz (np. tylko organizacja vs konta osobiste). Dla samych kont służbowych często lepiej **`MICROSOFT_TENANT_ID=organizations`** (w czacie: `/microsoft-set-client <UUID> organizations`) zamiast `common`.
 2. **Authentication → Allow public client flows:** **Yes**.
-3. **Platform „Mobile and desktop applications”:** dodaj redirect **dokładnie** taki, jaki pokazuje `/microsoft-show-settings` (np. `https://login.microsoftonline.com/common/oauth2/nativeclient` albo `.../organizations/...` albo `.../<GUID-tenanta>/...`). **Segment w URL musi być taki sam jak `MICROSOFT_TENANT_ID`.** Możesz dodać **dwa** wpisy (np. `common` i `organizations`), jeśli eksperymentujesz.
+3. **Platform „Mobile and desktop applications”:** gdy `MICROSOFT_TENANT_ID=common`, zarejestruj **trzy** URI (osobne wpisy): `.../common/oauth2/nativeclient`, `.../organizations/oauth2/nativeclient`, `.../consumers/oauth2/nativeclient` — Microsoft może zakończyć przeglądarkę na jednym z nich w zależności od typu konta; brak wpisu powoduje **`invalid_request`**. Dla innego tenanta wystarczy jeden URI zgodny z `/microsoft-show-settings`.
 4. **Usuń** stary redirect **Web** na `https://mcp.jarvis1.net/.../oauth/callback` — nie jest używany i myli przepływ.
 5. **API permissions (Delegated):** minimum `User.Read`, `Mail.ReadWrite`, `Mail.Send`, `Calendars.ReadWrite`, `Files.ReadWrite.All` — **Grant admin consent** dla katalogu (jeśli masz uprawnienia).
 6. **Manifest (opcjonalnie):** `allowPublicClient` = **true** (jeśli przełącznik w UI nie zadziała).
 7. Po zmianach w Azure: **`/microsoft-logout`** → **`/microsoft-login`**. Ostrzeżenie Microsoftu o „phishingu” przy URL z `error=` bywa fałszywe — chodzi o błąd w query, nie o realny phishing.
-8. Jeśli nadal **`invalid_request`** na `nativeclient`: ustaw tenant na **GUID katalogu** (Directory tenant ID) w Azure i ten sam GUID w agencie jako `MICROSOFT_TENANT_ID` oraz w redirect `.../<GUID>/oauth2/nativeclient`.
+8. **Brave / blokery:** tymczasowo wyłącz Shields (lub użyj Chrome/Edge) dla `microsoft.com` i `login.microsoftonline.com` — potrafią zepsuć przekierowania OAuth.
+9. Jeśli nadal **`invalid_request`** na `nativeclient`: ustaw tenant na **GUID katalogu** (Directory tenant ID) w Azure i ten sam GUID w agencie jako `MICROSOFT_TENANT_ID` oraz w redirect `.../<GUID>/oauth2/nativeclient`.
 
 ## Security Notes
 
