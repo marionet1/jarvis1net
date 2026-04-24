@@ -44,13 +44,27 @@ _MSAL_SCOPE_BLOCKLIST = frozenset(s.casefold() for s in ("offline_access", "open
 
 
 def _msal_request_scopes(config: AgentConfig) -> list[str]:
-    """Short Graph scope names only (e.g. Mail.ReadWrite). MSAL adds openid/profile/offline_access itself."""
-    out = [s.strip() for s in _scopes(config) if s.strip() and s.strip().casefold() not in _MSAL_SCOPE_BLOCKLIST]
-    if not out:
+    """
+    Graph delegated scopes for MSAL.
+
+    Short names from config (e.g. ``Mail.Read``) are sent as v2 resource scopes
+    ``https://graph.microsoft.com/Mail.Read`` — the form Microsoft documents for
+    the device authorization endpoint; it avoids some STS edge cases with bare
+    suffix-only scopes across ``common`` / MSA transfer steps.
+    """
+    raw = [s.strip() for s in _scopes(config) if s.strip() and s.strip().casefold() not in _MSAL_SCOPE_BLOCKLIST]
+    if not raw:
         raise RuntimeError(
             "Brak scope Graph po odfiltrowaniu zarezerwowanych (offline_access/openid/profile). "
             "Ustaw np. User.Read Mail.ReadWrite w /microsoft-set-scopes lub MICROSOFT_GRAPH_SCOPES."
         )
+    out: list[str] = []
+    for s in raw:
+        low = s.casefold()
+        if "://" in s or low.startswith("api://"):
+            out.append(s)
+        else:
+            out.append(f"https://graph.microsoft.com/{s}")
     return out
 
 
@@ -132,10 +146,11 @@ def run_device_code_login(config: AgentConfig, notify: Callable[[str], None]) ->
         detail = r.get("error_description") or r.get("error") or "brak access_token"
         redir = recommended_native_redirect_uri(config.microsoft_tenant_id)
         hint = (
-            " Jeśli w przeglądarce jest błąd o „response_type” na adresie …/oauth2/nativeclient: "
-            "nie otwieraj tego URL ręcznie — loguj się tylko przez stronę z kodem (np. devicelogin). "
-            "Spróbuj Edge/Chrome zamiast Brave. W Azure: jeden redirect Mobile/desktop jak "
-            f"{redir!r}, włączone **Allow public client flows**."
+            " Jeśli w przeglądarce jest błąd o „response_type” na …/oauth2/nativeclient: "
+            "spróbuj Edge/InPrivate; dla kont służbowych tenant organizations + redirect …/organizations/…; "
+            "w Azure: platforma Mobile and desktop, Allow public client flows, jeden redirect jak "
+            f"{redir!r}. Obejście bez przeglądarki na VPS: /microsoft-set-graph-token + "
+            "az account get-access-token --resource https://graph.microsoft.com -o tsv (na swoim PC)."
         )
         raise RuntimeError(str(detail) + hint)
     claims = result.get("id_token_claims") or {}

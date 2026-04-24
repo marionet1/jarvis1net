@@ -79,11 +79,40 @@ def main() -> None:
             cid_env = os.getenv("MICROSOFT_CLIENT_ID", "").strip()
             src = "env" if cid_env else ("plik" if rt.get("client_id") else "brak")
             has_cache = Path(config.microsoft_token_cache_path).expanduser().exists()
+            tok_env = bool(os.getenv("MICROSOFT_GRAPH_ACCESS_TOKEN", "").strip())
+            tok_rt = bool(
+                isinstance(rt.get("graph_access_token"), str) and str(rt.get("graph_access_token")).strip()
+            )
+            if tok_env:
+                tok_src = "env MICROSOFT_GRAPH_ACCESS_TOKEN"
+            elif tok_rt:
+                tok_src = "plik graph_access_token"
+            else:
+                tok_src = "MSAL po /microsoft-login"
             print(f"Client ID: {config.microsoft_client_id or '(brak)'} (źródło: {src})")
             print(f"Tenant: {config.microsoft_tenant_id}")
             print(f"Scopes: {' '.join(config.microsoft_graph_scopes)}")
+            print(f"Token Graph: {tok_src}")
             print(f"Ustawienia: {settings_path(config.audit_log_path)}")
             print(f"Cache tokenów: {'tak' if has_cache else 'nie'}\n")
+            continue
+
+        if cmd in {"/microsoft-set-graph-token", "/microsoft-paste-token"}:
+            parts = stripped.split(None, 1)
+            if len(parts) < 2 or not parts[1].strip():
+                print(
+                    "Użycie: /microsoft-set-graph-token <access_token>\n"
+                    "np. wynik: az account get-access-token --resource https://graph.microsoft.com -o tsv\n"
+                )
+                continue
+            tok = parts[1].strip()
+            if tok.casefold().startswith("bearer "):
+                tok = tok[7:].strip()
+            if len(tok) < 30:
+                print("Token zbyt krótki.\n")
+                continue
+            save_merged_settings(config.audit_log_path, {"graph_access_token": tok})
+            print("Zapisano graph_access_token (runtime).\n")
             continue
 
         if cmd in {"/microsoft-clear-runtime", "/microsoft-clear-settings"}:
@@ -105,6 +134,7 @@ def main() -> None:
                 print(f"Błąd logowania Microsoft: {exc}\n")
             continue
         if cmd in {"/microsoft-logout", "/msft-logout"}:
+            save_merged_settings(config.audit_log_path, {"graph_access_token": None})
             print(clear_token_cache_file(config))
             print()
             continue

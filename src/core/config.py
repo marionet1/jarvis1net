@@ -41,6 +41,10 @@ def load_config() -> AgentConfig:
 
     graph_token = os.getenv("MICROSOFT_GRAPH_ACCESS_TOKEN", "").strip()
     rt = read_settings(audit_log_path)
+    if not graph_token:
+        rt_tok = rt.get("graph_access_token")
+        if isinstance(rt_tok, str) and rt_tok.strip():
+            graph_token = rt_tok.strip()
 
     ms_client = os.getenv("MICROSOFT_CLIENT_ID", "").strip() or str(rt.get("client_id") or "").strip()
 

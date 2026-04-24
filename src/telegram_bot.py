@@ -87,8 +87,9 @@ def process_message(
             "jarvis1net — chat naturally and ask for file operations, directory listings, MCP health checks, and more.\n"
             "The bot keeps short chat memory for this conversation. To clear it, send: 'clear history'.\n"
             "When MCP tools are used, you will first receive a short 'Using mcp-jarvis1net' message with tool name and arguments.\n"
-            "Microsoft (Graph): wpisz w czacie /microsoft-set-client <Client-ID z Azure> [tenant], potem /microsoft-login (link + kod). "
-            "Alternatywa: MICROSOFT_CLIENT_ID w .env. Szczegóły: /microsoft-show-settings."
+            "Microsoft (Graph): /microsoft-set-client <Client-ID> [tenant], potem /microsoft-login; "
+            "albo token z PC: az account get-access-token --resource https://graph.microsoft.com -o tsv → /microsoft-set-graph-token <token>. "
+            "Szczegóły: /microsoft-show-settings."
         ]
 
     if command_base == "/microsoft-set-client":
@@ -131,6 +132,16 @@ def process_message(
         src = "MICROSOFT_CLIENT_ID w .env" if cid_env else ("microsoft_agent_settings.json (czat/CLI)" if rt.get("client_id") else "brak")
         has_cache = Path(config.microsoft_token_cache_path).expanduser().exists()
         cid_show = config.microsoft_client_id or "(brak)"
+        tok_env = bool(os.getenv("MICROSOFT_GRAPH_ACCESS_TOKEN", "").strip())
+        tok_rt = bool(
+            isinstance(rt.get("graph_access_token"), str) and str(rt.get("graph_access_token")).strip()
+        )
+        if tok_env:
+            tok_src = "MICROSOFT_GRAPH_ACCESS_TOKEN (.env)"
+        elif tok_rt:
+            tok_src = "graph_access_token (microsoft_agent_settings.json, np. /microsoft-set-graph-token)"
+        else:
+            tok_src = "brak (MSAL cache po /microsoft-login)"
         redirs = recommended_native_redirect_uris(config.microsoft_tenant_id)
         redir_lines = "\n".join(f"  • {u}" for u in redirs)
         lines = [
@@ -138,17 +149,40 @@ def process_message(
             f"- Client ID: {cid_show}",
             f"- Źródło Client ID: {src}",
             f"- Tenant: {config.microsoft_tenant_id}",
-            f"- Scope: {' '.join(config.microsoft_graph_scopes)}",
+            f"- Scope (krótkie nazwy w pliku; do STS idą jako https://graph.microsoft.com/…): {' '.join(config.microsoft_graph_scopes)}",
+            f"- Token Graph (nagłówek do MCP): {tok_src}",
             "- W Azure (Mobile/desktop) zarejestruj dokładnie TEN redirect (jeden wpis, zgodny z tenantem):",
             redir_lines,
             f"- Plik ustawień: {settings_path(config.audit_log_path)}",
             f"- Cache tokenów MSAL: {'tak' if has_cache else 'nie'}",
-            "Komendy: /microsoft-set-client …, /microsoft-set-scopes …, /microsoft-login, /microsoft-logout, /microsoft-clear-runtime",
+            "Komendy: /microsoft-set-client …, /microsoft-set-scopes …, /microsoft-login, /microsoft-set-graph-token …, "
+            "/microsoft-logout, /microsoft-clear-runtime",
         ]
         return ["\n".join(lines)]
 
     if command_base in {"/microsoft-clear-runtime", "/microsoft-clear-settings"}:
         return [clear_settings_file(config.audit_log_path)]
+
+    if command_base in {"/microsoft-set-graph-token", "/microsoft-paste-token"}:
+        parts = stripped.split(None, 1)
+        if len(parts) < 2 or not parts[1].strip():
+            return [
+                "Użycie: /microsoft-set-graph-token <access_token>\n\n"
+                "Na swoim PC (po az login): "
+                "az account get-access-token --resource https://graph.microsoft.com -o tsv\n"
+                "Wklej wynik tutaj (jedna linia). Token zapisuje się w microsoft_agent_settings.json obok logów — "
+                "nie udostępniaj czatu. Nadpisuje .env tylko jeśli MICROSOFT_GRAPH_ACCESS_TOKEN jest pusty."
+            ]
+        tok = parts[1].strip()
+        if tok.casefold().startswith("bearer "):
+            tok = tok[7:].strip()
+        if len(tok) < 30:
+            return ["Token wygląda na zbyt krótki — sprawdź, czy wkleiłeś pełny access_token (JWT)."]
+        save_merged_settings(config.audit_log_path, {"graph_access_token": tok})
+        return [
+            "Zapisano token Graph (runtime). Kolejne wywołania microsoft_* w MCP użyją go zamiast MSAL. "
+            "Wylogowanie: /microsoft-logout (czyści też ten token)."
+        ]
 
     if command_base in {"/microsoft-login", "/msft-login"}:
         cfg = load_config()
@@ -184,6 +218,7 @@ def process_message(
 
     if command_base in {"/microsoft-logout", "/msft-logout"}:
         cfg = load_config()
+        save_merged_settings(cfg.audit_log_path, {"graph_access_token": None})
         return [clear_token_cache_file(cfg)]
 
     if lower in _CLEAR_HISTORY_PHRASES:
