@@ -25,11 +25,30 @@ from core.microsoft_runtime_settings import (
 )
 from core.session_context import get_session_store
 
+
+def _looks_like_telegram_chat_key(key: str) -> bool:
+    """Klucz sesji = zwykle numeryczny chat_id (grupy mogą mieć ujemny ID)."""
+    s = key.strip()
+    if not s:
+        return False
+    if s.startswith("-"):
+        s = s[1:]
+    return s.isdigit()
+
+
 def run_telegram_startup_hooks(config: AgentConfig) -> None:
-    """Po restarcie procesu: opcjonalnie czyści session_paths i wysyła powitanie na dozwolone czaty."""
+    """Po restarcie procesu: opcjonalnie czyści session_paths i wysyła powitanie na czaty docelowe."""
     if not config.telegram_clear_session_on_start and not config.telegram_notify_on_start:
         return
     store = get_session_store(config.session_context_path)
+
+    notify_targets: list[str] = []
+    if config.telegram_notify_on_start:
+        if config.telegram_allowed_chat_ids:
+            notify_targets = list(config.telegram_allowed_chat_ids)
+        else:
+            notify_targets = [k for k in store.list_session_keys() if _looks_like_telegram_chat_key(k)]
+
     if config.telegram_clear_session_on_start:
         if config.telegram_allowed_chat_ids:
             for cid in config.telegram_allowed_chat_ids:
@@ -37,15 +56,16 @@ def run_telegram_startup_hooks(config: AgentConfig) -> None:
         else:
             store.clear_all_sessions()
         store.save()
+
     if not config.telegram_notify_on_start:
         return
-    if not config.telegram_allowed_chat_ids:
+    if not notify_targets:
         print(
-            "jarvis1net: TELEGRAM_NOTIFY_ON_START jest włączone, ale TELEGRAM_ALLOWED_CHAT_IDS jest puste — "
-            "pomijam wysyłkę powitania (ustaw numeryczne ID czatu, oddzielone przecinkiem)."
+            "jarvis1net: TELEGRAM_NOTIFY_ON_START włączone, ale brak odbiorców — ustaw TELEGRAM_ALLOWED_CHAT_IDS "
+            "albo napisz do bota raz (zapisze sesję), potem kolejny restart wyśle powitanie na znany chat_id."
         )
         return
-    for cid_s in config.telegram_allowed_chat_ids:
+    for cid_s in notify_targets:
         try:
             send_message(config.telegram_bot_token, int(cid_s), config.telegram_startup_message)
         except Exception as exc:

@@ -146,6 +146,11 @@ class SessionStore:
         with self._lock:
             self._by_key.clear()
 
+    def list_session_keys(self) -> list[str]:
+        """Klucze sesji (np. chat_id Telegram) — do powiadomień przy starcie."""
+        with self._lock:
+            return list(self._by_key.keys())
+
 
 _store: SessionStore | None = None
 _store_resolved: str | None = None
