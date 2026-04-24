@@ -10,7 +10,7 @@ from core.agent import run_agent_turn
 from core.audit import write_audit_event
 from core.config import load_config
 from core.llm import get_llm_reply
-from core.microsoft_auth import clear_token_cache_file, run_device_code_login
+from core.microsoft_auth import clear_token_cache_file, recommended_native_redirect_uri, run_device_code_login
 from core.microsoft_runtime_settings import (
     clear_settings_file,
     read_settings,
@@ -127,12 +127,15 @@ def process_message(
         src = "MICROSOFT_CLIENT_ID w .env" if cid_env else ("microsoft_agent_settings.json (czat/CLI)" if rt.get("client_id") else "brak")
         has_cache = Path(config.microsoft_token_cache_path).expanduser().exists()
         cid_show = config.microsoft_client_id or "(brak)"
+        redir = recommended_native_redirect_uri(config.microsoft_tenant_id)
         lines = [
             "Microsoft — konfiguracja agenta:",
             f"- Client ID: {cid_show}",
             f"- Źródło Client ID: {src}",
             f"- Tenant: {config.microsoft_tenant_id}",
             f"- Scope: {' '.join(config.microsoft_graph_scopes)}",
+            f"- W Azure (Mobile/desktop) dopisz DOKŁADNIE redirect:",
+            f"  {redir}",
             f"- Plik ustawień: {settings_path(config.audit_log_path)}",
             f"- Cache tokenów MSAL: {'tak' if has_cache else 'nie'}",
             "Komendy: /microsoft-set-client …, /microsoft-set-scopes …, /microsoft-login, /microsoft-logout, /microsoft-clear-runtime",

@@ -17,6 +17,12 @@ def _authority(tenant_id: str) -> str:
     return f"https://login.microsoftonline.com/{tid}"
 
 
+def recommended_native_redirect_uri(tenant_id: str) -> str:
+    """Must match Azure → Authentication → Mobile and desktop redirect URI (same segment as authority)."""
+    tid = (tenant_id or "common").strip() or "common"
+    return f"https://login.microsoftonline.com/{tid}/oauth2/nativeclient"
+
+
 def _scopes(config: AgentConfig) -> list[str]:
     return list(config.microsoft_graph_scopes)
 
@@ -25,8 +31,20 @@ def _scopes(config: AgentConfig) -> list[str]:
 _MSAL_SCOPE_BLOCKLIST = frozenset(s.casefold() for s in ("offline_access", "openid", "profile"))
 
 
+def _to_graph_scope_uri(scope: str) -> str:
+    """Use full Graph resource URIs in token requests (fewer invalid_request issues with STS)."""
+    s = scope.strip()
+    if not s:
+        return ""
+    if s.lower().startswith("https://"):
+        return s
+    return "https://graph.microsoft.com/" + s.lstrip("/")
+
+
 def _msal_request_scopes(config: AgentConfig) -> list[str]:
-    out = [s.strip() for s in _scopes(config) if s.strip() and s.strip().casefold() not in _MSAL_SCOPE_BLOCKLIST]
+    raw = [s.strip() for s in _scopes(config) if s.strip() and s.strip().casefold() not in _MSAL_SCOPE_BLOCKLIST]
+    out = [_to_graph_scope_uri(s) for s in raw]
+    out = [s for s in out if s]
     if not out:
         raise RuntimeError(
             "Brak scope Graph po odfiltrowaniu zarezerwowanych (offline_access/openid/profile). "
@@ -106,8 +124,14 @@ def run_device_code_login(config: AgentConfig, notify: Callable[[str], None]) ->
     result = app.acquire_token_by_device_flow(flow)
     _persist_cache(cache, config)
     if not result or "access_token" not in result:
-        detail = (result or {}).get("error_description") or (result or {}).get("error") or "brak access_token"
-        raise RuntimeError(str(detail))
+        r = result or {}
+        detail = r.get("error_description") or r.get("error") or "brak access_token"
+        redir = recommended_native_redirect_uri(config.microsoft_tenant_id)
+        hint = (
+            " Jeśli w przeglądarce było nativeclient + invalid_request: w Azure dodaj redirect "
+            f"{redir!r} (Mobile and desktop) — segment musi być taki sam jak tenant w agencie."
+        )
+        raise RuntimeError(str(detail) + hint)
     claims = result.get("id_token_claims") or {}
     username = claims.get("preferred_username") or claims.get("email")
     who = f" ({username})" if username else ""
