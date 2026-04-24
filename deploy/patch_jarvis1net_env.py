@@ -12,7 +12,7 @@ DEFAULTS: list[tuple[str, str]] = [
     ("MICROSOFT_TENANT_ID", "common"),
     (
         "MICROSOFT_GRAPH_SCOPES",
-        "User.Read Mail.Read Calendars.Read Files.Read.All",
+        "User.Read Mail.ReadWrite Mail.Send Calendars.ReadWrite Files.ReadWrite.All",
     ),
     ("MICROSOFT_GRAPH_ACCESS_TOKEN", ""),
     ("MICROSOFT_CLIENT_ID", ""),

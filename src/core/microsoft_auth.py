@@ -31,24 +31,13 @@ def _scopes(config: AgentConfig) -> list[str]:
 _MSAL_SCOPE_BLOCKLIST = frozenset(s.casefold() for s in ("offline_access", "openid", "profile"))
 
 
-def _to_graph_scope_uri(scope: str) -> str:
-    """Use full Graph resource URIs in token requests (fewer invalid_request issues with STS)."""
-    s = scope.strip()
-    if not s:
-        return ""
-    if s.lower().startswith("https://"):
-        return s
-    return "https://graph.microsoft.com/" + s.lstrip("/")
-
-
 def _msal_request_scopes(config: AgentConfig) -> list[str]:
-    raw = [s.strip() for s in _scopes(config) if s.strip() and s.strip().casefold() not in _MSAL_SCOPE_BLOCKLIST]
-    out = [_to_graph_scope_uri(s) for s in raw]
-    out = [s for s in out if s]
+    """Short Graph scope names only (e.g. Mail.ReadWrite). MSAL adds openid/profile/offline_access itself."""
+    out = [s.strip() for s in _scopes(config) if s.strip() and s.strip().casefold() not in _MSAL_SCOPE_BLOCKLIST]
     if not out:
         raise RuntimeError(
             "Brak scope Graph po odfiltrowaniu zarezerwowanych (offline_access/openid/profile). "
-            "Ustaw np. User.Read Mail.Read w /microsoft-set-scopes lub MICROSOFT_GRAPH_SCOPES."
+            "Ustaw np. User.Read Mail.ReadWrite w /microsoft-set-scopes lub MICROSOFT_GRAPH_SCOPES."
         )
     return out
 
@@ -121,6 +110,9 @@ def run_device_code_login(config: AgentConfig, notify: Callable[[str], None]) ->
         err = flow.get("error_description") or flow.get("error") or json.dumps(flow)
         raise RuntimeError(f"Nie udało się uruchomić logowania: {err}")
     notify(str(flow.get("message") or "Otwórz stronę Microsoft i wpisz kod urządzenia."))
+    vu = flow.get("verification_uri")
+    if isinstance(vu, str) and vu.strip():
+        notify("Adres strony logowania urządzenia (Microsoft):\n" + vu.strip())
     result = app.acquire_token_by_device_flow(flow)
     _persist_cache(cache, config)
     if not result or "access_token" not in result:

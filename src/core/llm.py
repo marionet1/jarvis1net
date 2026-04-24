@@ -23,6 +23,7 @@ Rules:
 - After tool calls, summarize clearly what was done, which paths were used, and any HTTP/tool errors.
 - Do not claim an operation was performed unless you actually executed the appropriate tool.
 - For Microsoft mailbox/calendar/OneDrive (`microsoft_*` tools), if tools report missing Graph token, tell the user to run **/microsoft-set-client** (paste Azure Client ID) then **/microsoft-login** in Telegram, or set env vars on the agent host.
+- For mail/calendar/OneDrive **create, update, delete, send**, prefer **`microsoft_graph_api`** with the correct Graph `path` and `method` (see Microsoft Graph REST docs); helper tools only cover simple reads/lists.
 """
 
 

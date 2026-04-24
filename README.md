@@ -57,7 +57,18 @@ To request an API key, send a DM on GitHub: [github.com/marionet1](https://githu
 - **Microsoft Graph** (optional): MCP still has no Azure secrets; the agent sends `X-Graph-Authorization`.
   - **Device code (Telegram):** either set `MICROSOFT_CLIENT_ID` in `.env`, **or** send **`/microsoft-set-client <Azure-Client-ID> [tenant]`** in chat (saved to `microsoft_agent_settings.json` next to audit logs — no restart). Then **`/microsoft-login`** sends the link + code; tokens go to `MICROSOFT_TOKEN_CACHE_PATH` or next to the audit log. **`/microsoft-logout`** clears the token cache; **`/microsoft-clear-runtime`** removes chat-saved Client ID/scopes. **`/microsoft-show-settings`** summarizes effective config.
   - **Static token:** `MICROSOFT_GRAPH_ACCESS_TOKEN` overrides the cache if set (e.g. short tests).
-  - **Azure Portal (ważne):** dla device code nie używaj Web redirectu na `mcp.jarvis1.net/.../oauth/callback` (to stary model). W **Authentication** włącz **Allow public client flows**, dodaj platformę **Mobile and desktop applications** z redirectem **dokładnie** `https://login.microsoftonline.com/<tenant>/oauth2/nativeclient`, gdzie `<tenant>` to ten sam ciąg co `MICROSOFT_TENANT_ID` (np. `common`, `organizations` lub GUID katalogu) — inaczej po zalogowaniu pojawia się `invalid_request` na stronie `nativeclient`. Komenda `/microsoft-show-settings` wypisuje gotowy URL redirectu.
+  - **Domyślne scope (token):** `User.Read Mail.ReadWrite Mail.Send Calendars.ReadWrite Files.ReadWrite.All` — po zmianie w Azure wyślij `/microsoft-logout` potem `/microsoft-login`, żeby odświeżyć zgodę.
+
+## Microsoft Azure — checklista (device code)
+
+1. **Typ konta** w rejestracji: zgodny z tym, czego używasz (np. tylko organizacja vs konta osobiste). Dla samych kont służbowych często lepiej **`MICROSOFT_TENANT_ID=organizations`** (w czacie: `/microsoft-set-client <UUID> organizations`) zamiast `common`.
+2. **Authentication → Allow public client flows:** **Yes**.
+3. **Platform „Mobile and desktop applications”:** dodaj redirect **dokładnie** taki, jaki pokazuje `/microsoft-show-settings` (np. `https://login.microsoftonline.com/common/oauth2/nativeclient` albo `.../organizations/...` albo `.../<GUID-tenanta>/...`). **Segment w URL musi być taki sam jak `MICROSOFT_TENANT_ID`.** Możesz dodać **dwa** wpisy (np. `common` i `organizations`), jeśli eksperymentujesz.
+4. **Usuń** stary redirect **Web** na `https://mcp.jarvis1.net/.../oauth/callback` — nie jest używany i myli przepływ.
+5. **API permissions (Delegated):** minimum `User.Read`, `Mail.ReadWrite`, `Mail.Send`, `Calendars.ReadWrite`, `Files.ReadWrite.All` — **Grant admin consent** dla katalogu (jeśli masz uprawnienia).
+6. **Manifest (opcjonalnie):** `allowPublicClient` = **true** (jeśli przełącznik w UI nie zadziała).
+7. Po zmianach w Azure: **`/microsoft-logout`** → **`/microsoft-login`**. Ostrzeżenie Microsoftu o „phishingu” przy URL z `error=` bywa fałszywe — chodzi o błąd w query, nie o realny phishing.
+8. Jeśli nadal **`invalid_request`** na `nativeclient`: ustaw tenant na **GUID katalogu** (Directory tenant ID) w Azure i ten sam GUID w agencie jako `MICROSOFT_TENANT_ID` oraz w redirect `.../<GUID>/oauth2/nativeclient`.
 
 ## Security Notes
 
