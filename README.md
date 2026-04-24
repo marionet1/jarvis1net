@@ -54,7 +54,9 @@ To request an API key, send a DM on GitHub: [github.com/marionet1](https://githu
 - `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOWED_CHAT_IDS`, `TELEGRAM_POLLING_TIMEOUT_SEC`
 - `AUDIT_LOG_PATH`, `SESSION_CONTEXT_PATH` (optional)
 - `MCP_SERVER_URL`, `MCP_API_KEY`, `MCP_TIMEOUT_SEC`, `MCP_MAX_TOOL_ROUNDS`
-- `MICROSOFT_GRAPH_ACCESS_TOKEN` (optional): delegated Graph access token for this agent; required for Microsoft tools — MCP has no Microsoft credentials and only proxies Graph when the agent sends this token as `X-Graph-Authorization`.
+- **Microsoft Graph** (optional): MCP still has no Azure secrets; the agent sends `X-Graph-Authorization`.
+  - **Device code (Telegram):** set `MICROSOFT_CLIENT_ID` (Azure app registration as a **public client**, enable **Allow public client flows**), delegated API permissions matching `MICROSOFT_GRAPH_SCOPES`, then send **`/microsoft-login`** to the bot — you get a link + code, tokens are saved to `MICROSOFT_TOKEN_CACHE_PATH` or next to the audit log. **`/microsoft-logout`** deletes that cache file.
+  - **Static token:** `MICROSOFT_GRAPH_ACCESS_TOKEN` overrides the cache if set (e.g. short tests).
 
 ## Security Notes
 

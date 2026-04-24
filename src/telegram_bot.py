@@ -1,3 +1,4 @@
+import threading
 import time
 from typing import Any, Callable
 
@@ -7,6 +8,7 @@ from core.agent import run_agent_turn
 from core.audit import write_audit_event
 from core.config import load_config
 from core.llm import get_llm_reply
+from core.microsoft_auth import clear_token_cache_file, run_device_code_login
 from core.session_context import get_session_store
 
 # Natural phrases that clear chat memory (without slash commands).
@@ -71,8 +73,40 @@ def process_message(
         return [
             "jarvis1net — chat naturally and ask for file operations, directory listings, MCP health checks, and more.\n"
             "The bot keeps short chat memory for this conversation. To clear it, send: 'clear history'.\n"
-            "When MCP tools are used, you will first receive a short 'Using mcp-jarvis1net' message with tool name and arguments."
+            "When MCP tools are used, you will first receive a short 'Using mcp-jarvis1net' message with tool name and arguments.\n"
+            "Microsoft (Graph / skrzynka): ustaw MICROSOFT_CLIENT_ID w .env, potem wyślij /microsoft-login — bot poda link i kod do wpisania w przeglądarce."
         ]
+
+    if command_base in {"/microsoft-login", "/msft-login"}:
+        cfg = load_config()
+        if not cfg.microsoft_client_id.strip():
+            return [
+                "Brak MICROSOFT_CLIENT_ID w .env agenta. Dodaj Application (client) ID z Azure Portal "
+                "(typ: public client / device code) i zrestartuj bota."
+            ]
+
+        bot_token = cfg.telegram_bot_token
+
+        def _worker() -> None:
+            try:
+
+                def _notify(msg: str) -> None:
+                    send_message(bot_token, chat_id, msg)
+
+                final = run_device_code_login(cfg, notify=_notify)
+                send_message(bot_token, chat_id, final)
+            except Exception as exc:
+                send_message(bot_token, chat_id, f"Logowanie Microsoft nie powiodło się: {exc}")
+
+        threading.Thread(target=_worker, daemon=True).start()
+        return [
+            "Microsoft: za chwilę dostaniesz wiadomość z linkiem i kodem — otwórz stronę, wpisz kod, zatwierdź uprawnienia. "
+            "Może to potrwać kilka minut (czas na logowanie w przeglądarce)."
+        ]
+
+    if command_base in {"/microsoft-logout", "/msft-logout"}:
+        cfg = load_config()
+        return [clear_token_cache_file(cfg)]
 
     if lower in _CLEAR_HISTORY_PHRASES:
         store = get_session_store(config.session_context_path)

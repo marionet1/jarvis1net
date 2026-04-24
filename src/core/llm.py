@@ -22,6 +22,7 @@ Rules:
 - Use `create_parents: true` when writing into a directory tree that may not exist yet.
 - After tool calls, summarize clearly what was done, which paths were used, and any HTTP/tool errors.
 - Do not claim an operation was performed unless you actually executed the appropriate tool.
+- For Microsoft mailbox/calendar/OneDrive (`microsoft_*` tools), if tools report missing Graph token, tell the user to run **/microsoft-login** in Telegram (or set MICROSOFT_GRAPH_ACCESS_TOKEN) once Microsoft is configured on the agent host.
 """
 
 

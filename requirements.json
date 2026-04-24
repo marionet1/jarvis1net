@@ -2,6 +2,7 @@
   "python_dependencies": [
     "python-dotenv",
     "openai",
-    "requests"
+    "requests",
+    "msal>=1.28.0"
   ]
 }

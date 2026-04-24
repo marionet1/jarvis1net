@@ -15,3 +15,7 @@ class AgentConfig:
     mcp_max_tool_rounds: int
     session_context_path: str
     microsoft_graph_access_token: str
+    microsoft_client_id: str
+    microsoft_tenant_id: str
+    microsoft_graph_scopes: list[str]
+    microsoft_token_cache_path: str

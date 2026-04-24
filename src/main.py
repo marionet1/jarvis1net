@@ -2,6 +2,7 @@ from core.agent import run_agent_turn
 from core.audit import write_audit_event
 from core.config import load_config
 from core.llm import get_llm_reply
+from core.microsoft_auth import clear_token_cache_file, run_device_code_login
 from core.session_context import get_session_store
 
 _CLEAR_HISTORY_PHRASES = frozenset(
@@ -32,6 +33,25 @@ def main() -> None:
             break
 
         low = line.lower()
+        cmd = low.split()[0] if low else ""
+        if cmd in {"/microsoft-login", "/msft-login"}:
+            if not config.microsoft_client_id.strip():
+                print("Ustaw MICROSOFT_CLIENT_ID w .env (Azure public client).\n")
+                continue
+            try:
+
+                def _n(msg: str) -> None:
+                    print(f"\n{msg}\n")
+
+                print(run_device_code_login(config, notify=_n))
+            except Exception as exc:
+                print(f"Błąd logowania Microsoft: {exc}\n")
+            continue
+        if cmd in {"/microsoft-logout", "/msft-logout"}:
+            print(clear_token_cache_file(config))
+            print()
+            continue
+
         if low in _CLEAR_HISTORY_PHRASES:
             st = get_session_store(config.session_context_path)
             st.clear_key("cli")

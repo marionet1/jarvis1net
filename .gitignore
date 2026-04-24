@@ -10,3 +10,4 @@ __pycache__/
 .DS_Store
 Thumbs.db
 logs/
+ms_graph_token_cache.json

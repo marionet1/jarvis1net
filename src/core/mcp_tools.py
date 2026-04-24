@@ -7,6 +7,7 @@ from typing import Any
 
 import requests
 
+from .microsoft_auth import resolve_graph_access_token
 from .types import AgentConfig
 
 
@@ -80,10 +81,10 @@ def run_mcp_tool(name: str, arguments: dict[str, Any], config: AgentConfig) -> s
     try:
         payload = {"name": name, "arguments": arguments or {}}
         extra: dict[str, str] | None = None
-        if name.startswith("microsoft_") and config.microsoft_graph_access_token:
-            raw = config.microsoft_graph_access_token.strip()
-            bearer = raw if raw.lower().startswith("bearer ") else f"Bearer {raw}"
-            extra = {"X-Graph-Authorization": bearer}
+        if name.startswith("microsoft_"):
+            token = resolve_graph_access_token(config)
+            if token:
+                extra = {"X-Graph-Authorization": f"Bearer {token}"}
         out = mcp_post_json(config, "/v1/tools/call", payload, extra_headers=extra)
         if isinstance(out, dict) and isinstance(out.get("result"), dict):
             return json.dumps(out["result"], ensure_ascii=False)
