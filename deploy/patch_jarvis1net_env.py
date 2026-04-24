@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Append missing Microsoft/MCP keys to .env (no overwrites). Run on server: python3 patch_jarvis1net_env.py"""
+"""Append missing Microsoft/MCP keys to .env (no overwrites). Run on server: python3 patch_jarvis1net_env.py
+
+Ustaw ENV_PATH poniżej, jeśli na serwerze leży inna ścieżka (domyślny przykład to stary layout katalogów).
+"""
 from __future__ import annotations
 
 import pathlib

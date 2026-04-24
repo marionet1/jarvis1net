@@ -1,4 +1,6 @@
-# jarvis1net (repozytorium GitHub: **agent-jarvis1net**)
+# jarvis1net (GitHub: **agent-jarvis1net**)
+
+**Powiązane repozytoria:** [stack-jarvis1net](https://github.com/marionet1/stack-jarvis1net) (monorepo: Docker) · [mcp-jarvis1net](https://github.com/marionet1/mcp-jarvis1net) (serwer MCP, paczka npm).
 
 Lekki asystent (OpenRouter) z opcjonalnym **Telegramem** / **CLI** i narzędziami **MCP** — tylko transport **stdio** do [`mcp-jarvis1net`](https://github.com/marionet1/mcp-jarvis1net).
 
@@ -51,6 +53,7 @@ Szczegóły: [stack-jarvis1net README](https://github.com/marionet1/stack-jarvis
 
 ---
 
+<a id="local-agent-only"></a>
 ## Quick start lokalnie (tylko agent, bez tego klonu jako root)
 
 Venv + zależności z `requirements.json`, kopia `.env.example` → `.env` **w tym katalogu** (`jarvis1net/`). Nadal **musisz** wskazać działający MCP w `.env` (`MCP_STDIO_ARGS`), chyba że testujesz tylko fragmenty bez narzędzi.
