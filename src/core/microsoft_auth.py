@@ -132,10 +132,10 @@ def run_device_code_login(config: AgentConfig, notify: Callable[[str], None]) ->
         detail = r.get("error_description") or r.get("error") or "brak access_token"
         redir = recommended_native_redirect_uri(config.microsoft_tenant_id)
         hint = (
-            " Jeśli widzisz m.in. „response_type”: w Azure usuń **zbędne** native redirecty — "
-            "zostaw **jeden** zgodny z tenantem agenta (np. tylko .../organizations/... gdy używasz "
-            "`/microsoft-set-client … organizations`). Zarejestruj dokładnie: "
-            f"{redir!r}"
+            " Jeśli w przeglądarce jest błąd o „response_type” na adresie …/oauth2/nativeclient: "
+            "nie otwieraj tego URL ręcznie — loguj się tylko przez stronę z kodem (np. devicelogin). "
+            "Spróbuj Edge/Chrome zamiast Brave. W Azure: jeden redirect Mobile/desktop jak "
+            f"{redir!r}, włączone **Allow public client flows**."
         )
         raise RuntimeError(str(detail) + hint)
     claims = result.get("id_token_claims") or {}

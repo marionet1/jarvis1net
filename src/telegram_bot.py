@@ -173,8 +173,13 @@ def process_message(
 
         threading.Thread(target=_worker, daemon=True).start()
         return [
-            "Microsoft: za chwilę dostaniesz wiadomość z linkiem i kodem — otwórz stronę, wpisz kod, zatwierdź uprawnienia. "
-            "Może to potrwać kilka minut (czas na logowanie w przeglądarce)."
+            "Microsoft: za chwilę dostaniesz wiadomość z linkiem i kodem.\n"
+            "— Otwórz wyłącznie adres z tej wiadomości (np. https://microsoft.com/devicelogin), wpisz kod, dokończ logowanie.\n"
+            "— Nie wklejaj i nie otwieraj ręcznie adresu …/oauth2/nativeclient — to adres zwrotny OAuth, nie strona logowania; "
+            "wejście tam bez pełnego łańcucha logowania daje błąd o braku response_type.\n"
+            "— Jeśli tak jest: spróbuj Edge lub Chrome (Brave czasem obcina parametry URL) albo wyłącz blokady dla microsoft.com i login.microsoftonline.com.\n"
+            "W Azure: Allow public client flows oraz jeden redirect Mobile/desktop zgodny z tenantem (/microsoft-show-settings).\n"
+            "Może to potrwać kilka minut."
         ]
 
     if command_base in {"/microsoft-logout", "/msft-logout"}:
