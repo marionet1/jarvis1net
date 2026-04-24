@@ -14,6 +14,7 @@ from core.microsoft_runtime_settings import (
     validate_client_id,
 )
 from core.session_context import get_session_store
+from core.startup_config import format_startup_report_plain, reset_runtime_agent_state, run_startup_checks
 
 _CLEAR_HISTORY_PHRASES = frozenset(
     {
@@ -27,6 +28,9 @@ _CLEAR_HISTORY_PHRASES = frozenset(
 
 def main() -> None:
     print("jarvis1net v0.1 — type naturally. Use /exit to quit. Type 'clear history' to reset chat memory.")
+    print()
+    _cfg0 = load_config()
+    print(format_startup_report_plain(run_startup_checks(_cfg0), title="jarvis1net — startup check (CLI)"))
     print()
 
     while True:
@@ -89,6 +93,17 @@ def main() -> None:
                 continue
             save_merged_settings(config.audit_log_path, {"graph_scopes": scope_list})
             print(f"Zapisano {len(scope_list)} scope(y).\n")
+            continue
+
+        if cmd in {"/jarvis-config-check", "/config-check"}:
+            print(format_startup_report_plain(run_startup_checks(config), title="jarvis1net — config check (CLI)"))
+            print()
+            continue
+
+        if cmd in {"/jarvis-config-reset", "/config-reset"}:
+            for msg in reset_runtime_agent_state(config):
+                print(msg)
+            print()
             continue
 
         if cmd in {"/jarvis-limits", "/mcp-limits", "/limits"}:

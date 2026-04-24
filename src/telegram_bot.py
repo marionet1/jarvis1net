@@ -30,6 +30,12 @@ from core.microsoft_runtime_settings import (
     validate_client_id,
 )
 from core.session_context import get_session_store
+from core.startup_config import (
+    StartupCheckResult,
+    format_startup_report_plain,
+    reset_runtime_agent_state,
+    run_startup_checks,
+)
 
 
 def _looks_like_telegram_chat_key(key: str) -> bool:
@@ -42,8 +48,11 @@ def _looks_like_telegram_chat_key(key: str) -> bool:
     return s.isdigit()
 
 
-def run_telegram_startup_hooks(config: AgentConfig) -> None:
-    """Po restarcie procesu: opcjonalnie czyści session_paths i wysyła powitanie na czaty docelowe."""
+def run_telegram_startup_hooks(
+    config: AgentConfig, *, startup_check: StartupCheckResult | None = None
+) -> None:
+    """Po restarcie procesu: opcjonalnie czyści session_paths, wysyła powitanie i raport konfiguracji."""
+    chk = startup_check if startup_check is not None else run_startup_checks(config)
     if not config.telegram_clear_session_on_start and not config.telegram_notify_on_start:
         return
     store = get_session_store(config.session_context_path)
@@ -76,6 +85,13 @@ def run_telegram_startup_hooks(config: AgentConfig) -> None:
             send_message(config.telegram_bot_token, int(cid_s), config.telegram_startup_message)
         except Exception as exc:
             print(f"jarvis1net: powitanie startowe do chat_id={cid_s} nie powiodło się: {exc}")
+
+    report = format_startup_report_plain(chk, title="Konfiguracja jarvis1net (po restarcie)")
+    for cid_s in notify_targets:
+        try:
+            send_message(config.telegram_bot_token, int(cid_s), report)
+        except Exception as exc:
+            print(f"jarvis1net: raport konfiguracji do chat_id={cid_s} nie powiodło się: {exc}")
 
 
 # Natural phrases that clear chat memory (without slash commands).
@@ -157,6 +173,10 @@ def _commands_info_botfather_style_html() -> str:
         _cmd_line("/jarvis-limits", "Limity: rundy narzędzi, max znaków JSON, timeout"),
         _cmd_line("/mcp-limits", "Alias /jarvis-limits"),
         _cmd_line("/limits", "Alias /jarvis-limits"),
+        _cmd_line("/jarvis-config-check", "Sprawdza .env + MCP + Graph (to samo co po restarcie)"),
+        _cmd_line("/config-check", "Alias /jarvis-config-check"),
+        _cmd_line("/jarvis-config-reset", "Czyści runtime MS + cache MSAL + pamięć czatu (jak nowy agent)"),
+        _cmd_line("/config-reset", "Alias /jarvis-config-reset"),
         "\n",
         "<b>Pamięć rozmowy</b>\n\n",
         _cmd_line("clear history", "Czyści kontekst (też: clear chat history, reset chat, start over, clear conversation)"),
@@ -313,12 +333,35 @@ def process_message(
             "Szybka zmiana tenantu: /microsoft-set-tenant consumers | organizations | common. "
             "Token z PC: /microsoft-set-graph-token. Szczegóły: /microsoft-show-settings.\n"
             "Limit MCP (rundy narzędzi / obcięcie JSON): /jarvis-limits\n"
+            "Sprawdzenie konfiguracji: **/jarvis-config-check**. Reset runtime (bez .env): **/jarvis-config-reset** "
+            "(tylko zaufane czaty jak /restart).\n"
             "Restart procesu bota (tylko czaty z TELEGRAM_ALLOWED_CHAT_IDS): **/restart** albo napisz np. „restart bota”.\n"
             "Pełna lista komend + narzędzia MCP (ładny układ HTML): **/info**"
         ]
 
     if command_base in {"/info", "/jarvis-info"}:
         return [TelegramOut(chunk, "HTML") for chunk in build_info_html_chunks(config)]
+
+    if command_base in {"/jarvis-config-check", "/config-check"}:
+        chk = run_startup_checks(config)
+        return [format_startup_report_plain(chk, title="Konfiguracja jarvis1net (na żądanie)")]
+
+    if command_base in {"/jarvis-config-reset", "/config-reset"}:
+        if not _restart_from_chat_allowed(config, chat_id_s):
+            if not config.telegram_allowed_chat_ids:
+                return [
+                    "Reset z czatu jest możliwy tylko gdy w .env ustawisz TELEGRAM_ALLOWED_CHAT_IDS "
+                    "(tylko te czaty mogą wysłać /jarvis-config-reset)."
+                ]
+            return ["Brak uprawnień do resetu z tego czatu."]
+        lines = reset_runtime_agent_state(config)
+        return [
+            "Wykonano reset runtime agenta (nie rusza pliku .env):\n"
+            + "\n".join(f"- {x}" for x in lines)
+            + "\n\nDalej: uzupełnij OPENROUTER_API_KEY / MCP_API_KEY w .env (jeśli trzeba), "
+            "Microsoft: /microsoft-set-client + /microsoft-login lub /microsoft-set-graph-token. "
+            "Potem napisz zwykłą wiadomość albo /jarvis-config-check."
+        ]
 
     if command_base in {"/jarvis-limits", "/mcp-limits", "/limits"}:
         return [
@@ -525,7 +568,9 @@ def run_bot() -> None:
 
     offset = 0
     print("Telegram bot started (chat-only long polling).")
-    run_telegram_startup_hooks(config)
+    startup_chk = run_startup_checks(config)
+    print(format_startup_report_plain(startup_chk, title="jarvis1net — raport konfiguracji (stdout)"))
+    run_telegram_startup_hooks(config, startup_check=startup_chk)
 
     while True:
         try:
