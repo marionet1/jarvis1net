@@ -25,6 +25,7 @@ Rules:
 - For Microsoft mailbox/calendar/OneDrive (`microsoft_*` tools), if tools report missing Graph token, tell the user to run **/microsoft-set-client** (paste Azure Client ID) then **/microsoft-login** in Telegram, or set env vars on the agent host.
 - For mail/calendar/OneDrive **create, update, delete, send**, prefer **`microsoft_graph_api`** with the correct Graph `path` and `method` (see Microsoft Graph REST docs); helper tools only cover simple reads/lists.
 - For **bulk** Graph reads (many folders/messages), use small ``$top`` (e.g. 25–50), ``$select`` with only needed fields, and iterate in steps — each tool JSON is **truncated** if too large, so prefer narrow queries over one giant response.
+- **Never** issue the same tool with the **same arguments** twice in one turn: if a result was truncated, narrow ``$select``/``$top`` or query the **next** folder id from an earlier response instead of repeating the identical GET.
 """
 
 
@@ -115,6 +116,14 @@ def _truncate_tool_result_for_context(text: str, max_chars: int) -> str:
     return text[:head] + note
 
 
+def _tool_call_signature(name: str, args: dict[str, Any]) -> str:
+    try:
+        payload = json.dumps(args, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    except TypeError:
+        payload = str(args)
+    return f"{name}\0{payload}"
+
+
 def _format_mcp_tool_round(tool_calls: Any) -> str:
     """Text shown to the user before executing an MCP tool round."""
     lines = ["Using mcp-jarvis1net"]
@@ -157,6 +166,10 @@ def _chat_tool_loop(
     pending_force_manifest = (
         _user_requests_mcp_tool_catalog(user_input) and _manifest_tool_in_schema_list(mcp_tools)
     )
+
+    # W jednej odpowiedzi na użytkownika: identyczne wywołanie (np. ten sam GET Graph) nie idzie drugi raz do MCP —
+    # model często zapętla się, gdy wynik był obcięty lub nie przeczytał listy folderów.
+    tool_result_cache: dict[str, str] = {}
 
     for _ in range(max_rounds):
         try:
@@ -202,8 +215,24 @@ def _chat_tool_loop(
                     args = json.loads(tc.function.arguments or "{}")
                 except json.JSONDecodeError:
                     args = {}
-                result = run_mcp_tool(tc.function.name, args, config)
-                clipped = _truncate_tool_result_for_context(result, config.mcp_tool_result_max_chars)
+                name = tc.function.name
+                dup_note = ""
+                if name == "mcp_refresh_tool_manifest":
+                    raw = run_mcp_tool(name, args, config)
+                else:
+                    sig = _tool_call_signature(name, args)
+                    if sig in tool_result_cache:
+                        raw = tool_result_cache[sig]
+                        dup_note = (
+                            "\n\n[_jarvis1net: to samo wywołanie już było — nie powtarzaj. "
+                            "Jeśli brakowało danych (obcięcie), zawęż $select/$top albo użyj id podfolderu z wcześniejszej odpowiedzi childFolders.]"
+                        )
+                    else:
+                        raw = run_mcp_tool(name, args, config)
+                        tool_result_cache[sig] = raw
+                clipped = _truncate_tool_result_for_context(raw, config.mcp_tool_result_max_chars)
+                if dup_note:
+                    clipped = clipped + dup_note
                 messages.append({"role": "tool", "tool_call_id": tc.id, "content": clipped})
             continue
 
