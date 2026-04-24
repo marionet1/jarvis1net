@@ -203,7 +203,6 @@ def _commands_info_botfather_style_html() -> str:
         _cmd_line("/jarvis-config-reset", "Clears MS runtime + chat-saved keys + MSAL cache + chat memory"),
         _cmd_line("/config-reset", "Alias for /jarvis-config-reset"),
         _cmd_line("/jarvis-set-openrouter-key", "Saves OPENROUTER key from chat next to logs"),
-        _cmd_line("/jarvis-set-mcp-key", "Saves MCP_API_KEY from chat next to logs"),
         "\n",
         "<b>Conversation memory</b>\n\n",
         _cmd_line("clear history", "Clears context (also: clear chat history, reset chat, start over, clear conversation)"),
@@ -230,11 +229,8 @@ def _commands_info_botfather_style_html() -> str:
 def build_info_html_chunks(config: AgentConfig) -> list[str]:
     """One or more HTML chunks (&lt; 4096 chars each) — commands + MCP tools."""
     cmd_html = _commands_info_botfather_style_html()
-    if config.mcp_mode == "http":
-        mcp_head = f"<i>MCP (HTTP):</i> <code>{html.escape(config.mcp_server_url.strip())}</code>\n\n"
-    else:
-        spec = f"{html.escape(config.mcp_stdio_command)} {' '.join(html.escape(x) for x in config.mcp_stdio_args)}"
-        mcp_head = f"<i>MCP (stdio):</i> <code>{spec}</code>\n\n"
+    spec = f"{html.escape(config.mcp_stdio_command)} {' '.join(html.escape(x) for x in config.mcp_stdio_args)}"
+    mcp_head = f"<i>MCP (stdio):</i> <code>{spec}</code>\n\n"
     head = (
         "<b>jarvis1net — /info</b>\n\n"
         + cmd_html
@@ -246,7 +242,7 @@ def build_info_html_chunks(config: AgentConfig) -> list[str]:
     mcp_note = ""
 
     if not mcp_can_use_tools(config):
-        mcp_note = "<b>MCP</b>: <i>not configured (stdio: MCP_STDIO_ARGS, or HTTP: MCP_API_KEY).</i>\n"
+        mcp_note = "<b>MCP</b>: <i>not configured — set MCP_STDIO_ARGS in .env (or Docker image defaults).</i>\n"
         one = (current + mcp_note)[:_INFO_HTML_MAX]
         return [one]
 
@@ -384,7 +380,7 @@ def process_message(
             "/microsoft-show-settings — podsumowanie.\n"
             "/jarvis-limits — limity MCP. /jarvis-config-check — status. /info — pełna lista.\n"
             "/jarvis-config-reset — czyści zapisane w czacie sekrety (wymagana lista TELEGRAM_ALLOWED_CHAT_IDS). "
-            "/jarvis-set-mcp-key tylko gdy MCP_MODE=http. /restart — restart procesu."
+            "/restart — restart procesu."
         ]
 
     if command_base in {"/info", "/jarvis-info"}:
@@ -410,26 +406,6 @@ def process_message(
             "/jarvis-config-check — podgląd stanu."
         ]
 
-    if command_base == "/jarvis-set-mcp-key":
-        if config.mcp_mode != "http":
-            return [
-                "MCP uses stdio (MCP_MODE=stdio) — there is no MCP API key. "
-                "Set MCP_STDIO_ARGS in .env (or use Docker). For remote HTTP MCP, set MCP_MODE=http and MCP_SERVER_URL."
-            ]
-        if not _jarvis_secrets_from_chat_allowed(config, chat_id_s):
-            return ["No permission (this chat is not in TELEGRAM_ALLOWED_CHAT_IDS)."]
-        parts = stripped.split(None, 1)
-        key = parts[1].strip() if len(parts) > 1 else ""
-        if not key:
-            return ["Usage: /jarvis-set-mcp-key <MCP API key> (HTTP mode only)"]
-        if len(key) < 8:
-            return ["MCP key looks too short."]
-        save_merged_jarvis_runtime(config.audit_log_path, {"mcp_api_key": key})
-        return [
-            "Saved MCP_API_KEY to jarvis_runtime_secrets.json. "
-            "It applies from the next message (no restart). /jarvis-config-check — preview."
-        ]
-
     if command_base in {"/jarvis-config-reset", "/config-reset"}:
         if not _restart_from_chat_allowed(config, chat_id_s):
             if not config.telegram_allowed_chat_ids:
@@ -442,19 +418,14 @@ def process_message(
         return [
             "Reset saved bot data (does not change .env on disk):\n"
             + "\n".join(f"- {x}" for x in lines)
-            + "\n\nNext: /jarvis-set-openrouter-key …, (HTTP) /jarvis-set-mcp-key …, Microsoft: /microsoft-set-client + "
+            + "\n\nNext: /jarvis-set-openrouter-key …, Microsoft: /microsoft-set-client + "
             "/microsoft-login or /microsoft-set-graph-token. Check: /jarvis-config-check."
         ]
 
     if command_base in {"/jarvis-limits", "/mcp-limits", "/limits"}:
-        stdio_line = (
-            f"- MCP stdio: {config.mcp_stdio_command} {' '.join(config.mcp_stdio_args)}\n"
-            if config.mcp_mode == "stdio"
-            else f"- MCP HTTP: {config.mcp_server_url}\n"
-        )
+        stdio_line = f"- MCP stdio: {config.mcp_stdio_command} {' '.join(config.mcp_stdio_args)}\n"
         lim = (
             "jarvis1net — MCP limits for this instance:\n"
-            f"- MCP_MODE: {config.mcp_mode}\n"
             + stdio_line
             + f"- MCP_MAX_TOOL_ROUNDS (effective): {config.mcp_max_tool_rounds}\n"
             + f"- MCP_TOOL_RESULT_MAX_CHARS: {config.mcp_tool_result_max_chars}\n"

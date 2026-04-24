@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 
 from .jarvis_runtime_settings import clear_jarvis_runtime_file, read_jarvis_runtime
-from .mcp_tools import load_mcp_tools, mcp_health
+from .mcp_tools import load_mcp_tools
 from .microsoft_agent import (
     clear_settings_file,
     clear_token_cache_file,
@@ -142,9 +142,6 @@ def load_config() -> AgentConfig:
     display_timezone = _validated_display_timezone(os.getenv("DISPLAY_TIMEZONE", "").strip())
     openrouter_show_cost_estimate = _env_bool("OPENROUTER_SHOW_COST_ESTIMATE", True)
 
-    mcp_mode = os.getenv("MCP_MODE", "stdio").strip().lower()
-    if mcp_mode not in ("stdio", "http"):
-        mcp_mode = "stdio"
     mcp_stdio_cmd = os.getenv("MCP_STDIO_COMMAND", "node").strip() or "node"
     mcp_stdio_args: list[str] = []
     raw_args = os.getenv("MCP_STDIO_ARGS", "").strip()
@@ -163,14 +160,10 @@ def load_config() -> AgentConfig:
             mcp_stdio_args = [script]
 
     openrouter_key = os.getenv("OPENROUTER_API_KEY", "").strip()
-    mcp_key = os.getenv("MCP_API_KEY", "").strip()
     jrt = read_jarvis_runtime(audit_log_path)
     j_or = jrt.get("openrouter_api_key")
     if isinstance(j_or, str) and j_or.strip():
         openrouter_key = j_or.strip()
-    j_mcp = jrt.get("mcp_api_key")
-    if isinstance(j_mcp, str) and j_mcp.strip():
-        mcp_key = j_mcp.strip()
 
     return AgentConfig(
         model=os.getenv("MODEL", "o4-mini"),
@@ -182,11 +175,8 @@ def load_config() -> AgentConfig:
         telegram_startup_message=telegram_startup_message,
         telegram_polling_timeout_sec=telegram_polling_timeout,
         audit_log_path=audit_log_path,
-        mcp_mode=mcp_mode,
         mcp_stdio_command=mcp_stdio_cmd,
         mcp_stdio_args=mcp_stdio_args,
-        mcp_server_url=os.getenv("MCP_SERVER_URL", "https://mcp.jarvis1.net").strip().rstrip("/"),
-        mcp_api_key=mcp_key,
         mcp_timeout_sec=mcp_timeout,
         mcp_max_tool_rounds=mcp_max_tool_rounds,
         mcp_tool_result_max_chars=mcp_tool_result_max_chars,
@@ -221,29 +211,16 @@ def run_startup_checks(config: AgentConfig) -> StartupCheckResult:
     blocking: list[str] = []
     warnings: list[str] = []
 
-    if config.mcp_mode == "http":
-        if not config.mcp_api_key.strip():
-            mcp_summary = "http disabled (no MCP_API_KEY)"
-        else:
-            try:
-                mcp_health(config)
-                mcp_summary = f"{config.mcp_server_url} — OK"
-            except Exception as exc:
-                mcp_summary = f"{config.mcp_server_url} — error ({type(exc).__name__})"
-                warnings.append(
-                    f"MCP HTTP: {str(exc)[:200]}. Set a valid key: /jarvis-set-mcp-key <key>"
-                )
+    if not (config.mcp_stdio_args and config.mcp_stdio_command):
+        mcp_summary = "stdio not configured (set MCP_STDIO_ARGS or MCP_STDIO_NODE_SCRIPT)"
+        warnings.append("MCP: point MCP_STDIO_ARGS to mcp-jarvis1net dist (see README / Docker).")
     else:
-        if not (config.mcp_stdio_args and config.mcp_stdio_command):
-            mcp_summary = "stdio not configured (set MCP_STDIO_ARGS or MCP_STDIO_NODE_SCRIPT)"
-            warnings.append("MCP: point MCP_STDIO_ARGS to mcp-jarvis1net dist (see README / Docker).")
-        else:
-            try:
-                _ = load_mcp_tools(config)
-                mcp_summary = f"stdio {config.mcp_stdio_command} {' '.join(config.mcp_stdio_args)} — OK"
-            except Exception as exc:
-                mcp_summary = f"stdio — error ({type(exc).__name__})"
-                warnings.append(f"MCP stdio: {str(exc)[:200]}")
+        try:
+            _ = load_mcp_tools(config)
+            mcp_summary = f"stdio {config.mcp_stdio_command} {' '.join(config.mcp_stdio_args)} — OK"
+        except Exception as exc:
+            mcp_summary = f"stdio — error ({type(exc).__name__})"
+            warnings.append(f"MCP stdio: {str(exc)[:200]}")
 
     tok = resolve_graph_access_token(config)
     if tok:
@@ -301,7 +278,7 @@ def format_startup_report_plain(result: StartupCheckResult, *, title: str = "jar
     lines.append("")
     lines.append(
         "First: /jarvis-set-openrouter-key <key from https://openrouter.ai/keys> (saved on disk, survives restarts). "
-        "Then MCP: stdio via env (Docker/README) or HTTP with /jarvis-set-mcp-key; "
+        "Then MCP: stdio via .env (Docker/README); "
         "Microsoft: /microsoft-set-client + /microsoft-login or /microsoft-set-graph-token. "
         "Clear saved keys: /jarvis-config-reset."
     )

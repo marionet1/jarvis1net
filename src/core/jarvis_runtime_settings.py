@@ -1,4 +1,4 @@
-"""OpenRouter / MCP keys saved from chat (next to logs); override .env when present in this file."""
+"""OpenRouter key saved from chat (next to logs); override .env when present in this file."""
 
 from __future__ import annotations
 

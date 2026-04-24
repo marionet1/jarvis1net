@@ -12,11 +12,8 @@ class AgentConfig:
     telegram_startup_message: str
     telegram_polling_timeout_sec: int
     audit_log_path: str
-    mcp_mode: str
     mcp_stdio_command: str
     mcp_stdio_args: list[str]
-    mcp_server_url: str
-    mcp_api_key: str
     mcp_timeout_sec: int
     mcp_max_tool_rounds: int
     mcp_tool_result_max_chars: int

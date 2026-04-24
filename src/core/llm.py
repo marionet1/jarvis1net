@@ -386,7 +386,7 @@ def _chat_tool_loop(
     except Exception as exc:
         return f"MCP tools manifest error: {exc}"
     if not mcp_tools:
-        return "No MCP tools are available (configure MCP stdio args or HTTP MCP_API_KEY)."
+        return "No MCP tools are available (configure MCP stdio: MCP_STDIO_ARGS in .env or Docker defaults)."
 
     pending_force_manifest = (
         _user_requests_mcp_tool_catalog(user_input) and _manifest_tool_in_schema_list(mcp_tools)

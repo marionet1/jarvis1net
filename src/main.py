@@ -116,27 +116,9 @@ def main() -> None:
             print("Saved openrouter_api_key to jarvis_runtime_secrets.json\n")
             continue
 
-        if cmd == "/jarvis-set-mcp-key":
-            if config.mcp_mode != "http":
-                print("MCP stdio mode (default) — no API key. Set MCP_STDIO_ARGS in .env.\n")
-                continue
-            parts = stripped.split(None, 1)
-            key = parts[1].strip() if len(parts) > 1 else ""
-            if not key:
-                print("Usage: /jarvis-set-mcp-key <key> (MCP_MODE=http only)\n")
-                continue
-            if len(key) < 8:
-                print("Key too short.\n")
-                continue
-            save_merged_jarvis_runtime(config.audit_log_path, {"mcp_api_key": key})
-            print("Saved mcp_api_key to jarvis_runtime_secrets.json\n")
-            continue
-
         if cmd in {"/jarvis-limits", "/mcp-limits", "/limits"}:
             print("jarvis1net — MCP limits:")
-            print(f"  MCP_MODE: {config.mcp_mode}")
-            if config.mcp_mode == "stdio":
-                print(f"  MCP_STDIO: {config.mcp_stdio_command} {' '.join(config.mcp_stdio_args)}")
+            print(f"  MCP_STDIO: {config.mcp_stdio_command} {' '.join(config.mcp_stdio_args)}")
             print(f"  MCP_MAX_TOOL_ROUNDS: {config.mcp_max_tool_rounds}")
             print(f"  MCP_TOOL_RESULT_MAX_CHARS: {config.mcp_tool_result_max_chars}")
             print(f"  MCP_MICROSOFT_TOOL_RESULT_MAX_CHARS: {config.mcp_microsoft_tool_result_max_chars}")
