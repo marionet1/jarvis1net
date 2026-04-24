@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from typing import Any, Callable
 from urllib.parse import parse_qsl, unquote
 
@@ -26,7 +27,7 @@ Rules:
 - For Microsoft mailbox/calendar/OneDrive (`microsoft_*` tools), if tools report missing Graph token, tell the user to run **/microsoft-set-client** (paste Azure Client ID) then **/microsoft-login** in Telegram, or set env vars on the agent host.
 - **Microsoft:** go straight to the concrete `microsoft_*` tool the user needs (for example `microsoft_graph_api` or `microsoft_graph_me`). Call **`microsoft_integration_status` only if it still appears in the tool list and you must diagnose missing Graph token** — never as a routine first step before every mail/calendar action.
 - For mail/calendar/OneDrive **create, update, delete, send**, prefer **`microsoft_graph_api`** with the correct Graph `path` and `method` (see Microsoft Graph REST docs); helper tools only cover simple reads/lists.
-- **Calendar (incl. all-day):** use **`microsoft_calendar_list_events`** (wraps `GET /me/calendarView` with a date window) or **`microsoft_graph_api`** on **`/me/calendarView`** with **`startDateTime`** and **`endDateTime`** (ISO UTC). Plain **`GET /me/calendar/events?$top=…`** often surfaces timed meetings first and can **omit or bury all-day** items in the first page — do not rely on it alone when the user expects whole-day entries.
+- **Calendar (incl. all-day):** for **one named calendar day** (“niedziela”, “26 kwietnia”) use **`microsoft_calendar_events_on_date`** once with **`date=YYYY-MM-DD`** and optional **`time_zone`** (default `Europe/Warsaw`) — **do not** fire many `microsoft_graph_api` GETs with tweaked URLs. For rolling “next weeks” use **`microsoft_calendar_list_events`**. If you must use **`microsoft_graph_api`**, a **single** `GET /me/calendarView` with **`startDateTime`** / **`endDateTime`** (camelCase) is enough; **avoid** `/me/events?$filter=start/dateTime…` for mixed all-day + timed lists. **At most one** successful calendar list per user question unless paging **`@odata.nextLink`**.
 - **Mail list / “pokaż ostatnie N maili” (bez czytania treści):** używaj GET na wiadomościach z ``$select=id,subject,receivedDateTime,from`` (pole ``from`` zwraca adres/nazwę nadawcy). **Nie** dodawaj ``bodyPreview``, ``body`` ani ``uniqueBody``, dopóki użytkownik wyraźnie nie poprosi o treść / odczytanie konkretnej wiadomości — inaczej wynik narzędzia bywa obcięty i giną kolejne maile. Ustaw ``$top`` równy liczbie prośby (np. dwa ostatnie → ``$top=2``).
 - To **mark many messages read**, after a GET with `value` of unread messages call **`microsoft_mail_mark_read`** with **all** `value[].id` strings in one `message_ids` array (repeat for next pages). Do **not** answer “all marked” after a single `PATCH` unless `value` had exactly one item or you used `microsoft_mail_mark_read` covering every id.
 - For **bulk** Graph reads (many folders/messages), use small ``$top`` (e.g. 25–50), ``$select`` with only needed fields, and iterate in steps — each tool JSON is **truncated** if too large, so prefer narrow queries over one giant response.
@@ -255,6 +256,76 @@ def _graph_unread_messages_loose_key(name: str, args: dict[str, Any]) -> str | N
     return f"mg:unread:{base}\0{filt}\0page:{page}"
 
 
+def _canonical_graph_query_param_key_for_dedupe(key: str) -> str:
+    k = str(key).strip()
+    if k.startswith("$"):
+        return "$" + k[1:].lower()
+    low = k.lower()
+    if low == "startdatetime":
+        return "startDateTime"
+    if low == "enddatetime":
+        return "endDateTime"
+    return k
+
+
+def _graph_calendar_query_dict_from_graph_api_args(args: dict[str, Any]) -> dict[str, str]:
+    path = str(args.get("path", "")).strip()
+    q: dict[str, str] = {}
+    if "?" in path:
+        _, qs = path.split("?", 1)
+        for kk, vv in parse_qsl(unquote(qs), keep_blank_values=True):
+            ck = _canonical_graph_query_param_key_for_dedupe(kk)
+            q[ck] = str(vv)
+    raw_q = args.get("query")
+    if isinstance(raw_q, dict):
+        for kk, vv in raw_q.items():
+            ck = _canonical_graph_query_param_key_for_dedupe(str(kk))
+            q[ck] = str(vv)
+    return q
+
+
+def _parse_graph_datetime_iso(value: str) -> datetime | None:
+    s = unquote(value.strip())
+    if s.endswith("Z"):
+        s = s[:-1] + "+00:00"
+    try:
+        return datetime.fromisoformat(s)
+    except ValueError:
+        return None
+
+
+def _graph_calendarview_loose_key(name: str, args: dict[str, Any]) -> str | None:
+    if name != "microsoft_graph_api":
+        return None
+    if str(args.get("method", "GET")).strip().upper() != "GET":
+        return None
+    path = str(args.get("path", "")).strip()
+    if "calendarview" not in path.casefold():
+        return None
+    q = _graph_calendar_query_dict_from_graph_api_args(args)
+    st = q.get("startDateTime")
+    en = q.get("endDateTime")
+    if not st or not en:
+        return None
+    ds = _parse_graph_datetime_iso(st)
+    de = _parse_graph_datetime_iso(en)
+    if ds is None or de is None:
+        return None
+    ds = ds.astimezone(timezone.utc)
+    de = de.astimezone(timezone.utc)
+    return f"mg:calview:{ds.isoformat()}:{de.isoformat()}"
+
+
+def _microsoft_calendar_day_loose_key(name: str, args: dict[str, Any]) -> str | None:
+    if name != "microsoft_calendar_events_on_date":
+        return None
+    date_s = str(args.get("date", "")).strip()
+    tz_s = str(args.get("time_zone", "Europe/Warsaw")).strip() or "Europe/Warsaw"
+    if not date_s:
+        return None
+    return f"ms:calday:{date_s}:{tz_s}"
+
+
 def _graph_patch_to_message(path: str, method: str) -> bool:
     """True when PATCH targets a message resource (clears Graph GET soft-cache)."""
     if str(method).strip().upper() != "PATCH":
@@ -313,6 +384,7 @@ def _chat_tool_loop(
     # GET nieprzeczytanych: ten sam folder+filter+strona, inne $top → bez ponownego HTTP; po PATCH generacja rośnie.
     graph_read_generation = 0
     graph_unread_soft_cache: dict[str, tuple[str, int]] = {}
+    graph_cal_soft_cache: dict[str, str] = {}
     usage_prompt = 0
     usage_completion = 0
     model_rounds = 0
@@ -376,29 +448,42 @@ def _chat_tool_loop(
                     raw = run_mcp_tool(name, args, config)
                 else:
                     sig = _tool_call_signature(name, args)
-                    loose = _graph_unread_messages_loose_key(name, args)
-                    if loose is not None:
-                        prev = graph_unread_soft_cache.get(loose)
-                        if prev is not None and prev[1] == graph_read_generation:
-                            raw = prev[0]
+                    cal_key = _graph_calendarview_loose_key(name, args) or _microsoft_calendar_day_loose_key(
+                        name, args
+                    )
+                    if cal_key is not None and cal_key in graph_cal_soft_cache:
+                        raw = graph_cal_soft_cache[cal_key]
+                        dup_note = (
+                            "\n\n[_jarvis1net: to samo okno kalendarza (granice start/end UTC albo ta sama data+strefa) "
+                            "już było — użyj poprzedniego JSON; nie powtarzaj GET calendarView.]"
+                        )
+                    else:
+                        loose = _graph_unread_messages_loose_key(name, args)
+                        if loose is not None:
+                            prev = graph_unread_soft_cache.get(loose)
+                            if prev is not None and prev[1] == graph_read_generation:
+                                raw = prev[0]
+                                dup_note = (
+                                    "\n\n[_jarvis1net: ponowny GET nieprzeczytanych w tym samym folderze i filtrze "
+                                    "(np. inne $top) — to ta sama lista. Użyj microsoft_mail_mark_read na każde id z value "
+                                    "albo microsoft_mail_mark_folder_read(mail_folder_id). Następna strona: tylko @odata.nextLink, nie $skip.]"
+                                )
+                            else:
+                                raw = run_mcp_tool(name, args, config)
+                                tool_result_cache[sig] = raw
+                                graph_unread_soft_cache[loose] = (raw, graph_read_generation)
+                        elif sig in tool_result_cache:
+                            raw = tool_result_cache[sig]
                             dup_note = (
-                                "\n\n[_jarvis1net: ponowny GET nieprzeczytanych w tym samym folderze i filtrze "
-                                "(np. inne $top) — to ta sama lista. Użyj microsoft_mail_mark_read na każde id z value "
-                                "albo microsoft_mail_mark_folder_read(mail_folder_id). Następna strona: tylko @odata.nextLink, nie $skip.]"
+                                "\n\n[_jarvis1net: to samo wywołanie już było — nie powtarzaj. "
+                                "Jeśli brakowało danych (obcięcie), zawęż $select/$top albo użyj id podfolderu z wcześniejszej odpowiedzi childFolders.]"
                             )
                         else:
                             raw = run_mcp_tool(name, args, config)
                             tool_result_cache[sig] = raw
-                            graph_unread_soft_cache[loose] = (raw, graph_read_generation)
-                    elif sig in tool_result_cache:
-                        raw = tool_result_cache[sig]
-                        dup_note = (
-                            "\n\n[_jarvis1net: to samo wywołanie już było — nie powtarzaj. "
-                            "Jeśli brakowało danych (obcięcie), zawęż $select/$top albo użyj id podfolderu z wcześniejszej odpowiedzi childFolders.]"
-                        )
-                    else:
-                        raw = run_mcp_tool(name, args, config)
-                        tool_result_cache[sig] = raw
+                    if cal_key is not None:
+                        graph_cal_soft_cache[cal_key] = raw
+                    tool_result_cache[sig] = raw
                 shrunk = _maybe_shrink_microsoft_tool_json(name, raw)
                 clipped = _truncate_tool_result_for_context(shrunk, _tool_result_char_cap(name, config))
                 if dup_note:
@@ -410,6 +495,7 @@ def _chat_tool_loop(
                 ):
                     graph_read_generation += 1
                     graph_unread_soft_cache.clear()
+                    graph_cal_soft_cache.clear()
                     for k in list(tool_result_cache.keys()):
                         if k.startswith("microsoft_graph_api\0") or k.startswith(
                             "microsoft_mail_mark_read\0"
