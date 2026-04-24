@@ -136,43 +136,55 @@ class TelegramOut:
 _INFO_HTML_MAX = 3800
 
 
-def _commands_info_pre_table() -> str:
-    rows: list[tuple[str, str]] = [
-        ("Komenda", "Opis"),
-        ("/start, /help", "Pomoc, skrót konfiguracji"),
-        ("/info, /jarvis-info", "Komendy bota + lista narzędzi MCP (HTML)"),
-        ("/restart, /jarvis-restart", "Restart procesu (tylko TELEGRAM_ALLOWED_CHAT_IDS)"),
-        ("restart bota (frazy)", "To samo co /restart — dokładna fraza z listy w kodzie"),
-        ("/jarvis-limits, /limits", "Limity MCP / obcięcie JSON / timeout"),
-        ("clear history (EN)", "Czyści pamięć rozmowy w tym czacie"),
-        ("/microsoft-set-client …", "Client ID Azure + opcjonalnie tenant → plik runtime"),
-        ("/microsoft-set-tenant …", "Tenant (consumers / organizations / …)"),
-        ("/microsoft-set-scopes …", "Lista scope Graph"),
-        ("/microsoft-show-settings", "Podsumowanie MS + redirecty"),
-        ("/microsoft-login", "Logowanie device code (w tle)"),
-        ("/microsoft-logout", "Wylogowanie + cache MSAL"),
-        ("/microsoft-set-graph-token …", "Wklejony access token do Graph"),
-        ("/microsoft-clear-runtime", "Czyści plik runtime ustawień"),
+def _cmd_line(cmd: str, description: str) -> str:
+    """Jedna linia w stylu BotFather: /komenda - opis (HTML)."""
+    return f"{html.escape(cmd)} - {html.escape(description)}\n"
+
+
+def _commands_info_botfather_style_html() -> str:
+    """Sekcje pogrubione + lista „/polecenie - opis” jak u @BotFather."""
+    parts: list[str] = [
+        "Możesz sterować botem, wysyłając te komendy:\n\n",
+        "<b>Ogólne</b>\n\n",
+        _cmd_line("/start", "Pomoc i skrót konfiguracji"),
+        _cmd_line("/help", "To samo co /start"),
+        _cmd_line("/info", "Ta lista: komendy + narzędzia MCP"),
+        _cmd_line("/jarvis-info", "Alias /info"),
+        "\n",
+        "<b>Bot i limity MCP</b>\n\n",
+        _cmd_line("/restart", "Restart procesu (tylko TELEGRAM_ALLOWED_CHAT_IDS)"),
+        _cmd_line("/jarvis-restart", "Alias /restart"),
+        _cmd_line("/jarvis-limits", "Limity: rundy narzędzi, max znaków JSON, timeout"),
+        _cmd_line("/mcp-limits", "Alias /jarvis-limits"),
+        _cmd_line("/limits", "Alias /jarvis-limits"),
+        "\n",
+        "<b>Pamięć rozmowy</b>\n\n",
+        _cmd_line("clear history", "Czyści kontekst (też: clear chat history, reset chat, start over, clear conversation)"),
+        "\n",
+        "<b>Microsoft Graph</b>\n\n",
+        _cmd_line("/microsoft-set-client", "Client ID z Azure + opcjonalnie tenant → plik runtime"),
+        _cmd_line("/microsoft-set-tenant", "Tenant: consumers, organizations, common lub GUID"),
+        _cmd_line("/microsoft-set-scopes", "Lista scope (np. Mail.ReadWrite); alias: /microsoft-scopes"),
+        _cmd_line("/microsoft-show-settings", "Podsumowanie MS + redirecty; alias: /microsoft-config"),
+        _cmd_line("/microsoft-login", "Logowanie device code w tle; alias: /msft-login"),
+        _cmd_line("/microsoft-logout", "Wylogowanie + cache MSAL; alias: /msft-logout"),
+        _cmd_line("/microsoft-set-graph-token", "Wklej access token do Graph; alias: /microsoft-paste-token"),
+        _cmd_line("/microsoft-clear-runtime", "Czyści plik runtime ustawień; alias: /microsoft-clear-settings"),
+        "\n",
+        "<b>Bez slasha (jak u BotFather — „frazy”)</b>\n\n",
+        _cmd_line("restart bota", "To samo co /restart (dokładnie ta fraza lub: restartuj bota, zrestartuj bota, restart jarvis)"),
     ]
-    w = 28
-    lines = [f"{rows[0][0].ljust(w)} │ {rows[0][1]}", "─" * w + "─┼─" + "─" * 42]
-    for a, b in rows[1:]:
-        ca, cb = a.ljust(w), b
-        if len(cb) > 44:
-            cb = cb[:41] + "…"
-        lines.append(f"{ca[:w].ljust(w)} │ {cb}")
-    return "\n".join(lines)
+    return "".join(parts)
 
 
 def build_info_html_chunks(config: AgentConfig) -> list[str]:
     """Kilka wiadomości HTML (&lt; 4096 znaków każda) — komendy + narzędzia MCP."""
-    pre_tbl = _commands_info_pre_table()
+    cmd_html = _commands_info_botfather_style_html()
     head = (
         "<b>jarvis1net — /info</b>\n\n"
-        "<b>1) Komendy w Telegramie</b>\n"
-        f"<pre>{html.escape(pre_tbl)}</pre>\n\n"
-        "<b>2) Narzędzia MCP</b>\n"
-        f"<i>Serwer:</i> <code>{html.escape(config.mcp_server_url.strip())}</code>\n\n"
+        + cmd_html
+        + "\n<b>Narzędzia MCP</b>\n\n"
+        + f"<i>Serwer:</i> <code>{html.escape(config.mcp_server_url.strip())}</code>\n\n"
     )
     chunks: list[str] = []
     current = head
@@ -206,9 +218,9 @@ def build_info_html_chunks(config: AgentConfig) -> list[str]:
         if len(desc) > 380:
             desc = desc[:377] + "…"
         if desc:
-            tool_blocks.append(f"<b>{html.escape(name)}</b>\n<i>{html.escape(desc)}</i>\n")
+            tool_blocks.append(f"<code>{html.escape(name)}</code> - {html.escape(desc)}\n")
         else:
-            tool_blocks.append(f"<b>{html.escape(name)}</b>\n")
+            tool_blocks.append(f"<code>{html.escape(name)}</code>\n")
 
     if not tool_blocks:
         current += "<i>(pusty manifest narzędzi)</i>"
@@ -217,7 +229,7 @@ def build_info_html_chunks(config: AgentConfig) -> list[str]:
     for block in tool_blocks:
         if len(current) + len(block) > _INFO_HTML_MAX:
             chunks.append(current)
-            current = "<b>2) Narzędzia MCP</b> <i>(ciąg dalszy)</i>\n\n" + block
+            current = "<b>Narzędzia MCP</b> <i>(ciąg dalszy)</i>\n\n" + block
         else:
             current += block
     if current.strip():
