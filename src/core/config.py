@@ -52,7 +52,7 @@ def load_config() -> AgentConfig:
     if ms_tenant_env:
         ms_tenant = ms_tenant_env
     else:
-        ms_tenant = str(rt.get("tenant_id") or "common").strip() or "common"
+        ms_tenant = str(rt.get("tenant_id") or "organizations").strip() or "organizations"
 
     scopes_env = os.getenv("MICROSOFT_GRAPH_SCOPES", "").strip()
     if scopes_env:

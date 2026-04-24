@@ -97,11 +97,11 @@ def process_message(
         if len(parts) < 2:
             return [
                 "Użycie: /microsoft-set-client <Application-Client-ID> [tenant]\n"
-                "tenant: np. common, organizations lub GUID katalogu (domyślnie common).\n"
+                "tenant: np. organizations, common, consumers lub GUID katalogu (domyślnie organizations — konta służbowe).\n"
                 "W Azure: rejestracja aplikacji → public client + device code + Allow public client flows."
             ]
         cid = parts[1].strip()
-        tenant = parts[2].strip() if len(parts) > 2 else "common"
+        tenant = parts[2].strip() if len(parts) > 2 else "organizations"
         if not validate_client_id(cid):
             return ["Client ID musi być pełnym UUID (format 8-4-4-4-12 z Azure Portal)."]
         save_merged_settings(config.audit_log_path, {"client_id": cid, "tenant_id": tenant})
@@ -149,7 +149,7 @@ def process_message(
             f"- Client ID: {cid_show}",
             f"- Źródło Client ID: {src}",
             f"- Tenant: {config.microsoft_tenant_id}",
-            f"- Scope (krótkie nazwy w pliku; do STS idą jako https://graph.microsoft.com/…): {' '.join(config.microsoft_graph_scopes)}",
+            f"- Scope: {' '.join(config.microsoft_graph_scopes)}",
             f"- Token Graph (nagłówek do MCP): {tok_src}",
             "- W Azure (Mobile/desktop) zarejestruj dokładnie TEN redirect (jeden wpis, zgodny z tenantem):",
             redir_lines,

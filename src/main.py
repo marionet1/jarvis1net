@@ -52,7 +52,7 @@ def main() -> None:
                 print("Użycie: /microsoft-set-client <Client-ID> [tenant]\n")
                 continue
             cid = parts[1].strip()
-            tenant = parts[2].strip() if len(parts) > 2 else "common"
+            tenant = parts[2].strip() if len(parts) > 2 else "organizations"
             if not validate_client_id(cid):
                 print("Client ID musi być pełnym UUID z Azure.\n")
                 continue

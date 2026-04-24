@@ -61,7 +61,7 @@ To request an API key, send a DM on GitHub: [github.com/marionet1](https://githu
 
 ## Microsoft Azure — checklista (device code)
 
-1. **Typ konta** w rejestracji: zgodny z tym, czego używasz (np. tylko organizacja vs konta osobiste). Dla samych kont służbowych często lepiej **`MICROSOFT_TENANT_ID=organizations`** (w czacie: `/microsoft-set-client <UUID> organizations`) zamiast `common`.
+1. **Typ konta** w rejestracji: zgodny z tym, czego używasz. **Domyślnie** agent i `/microsoft-set-client <UUID>` (bez drugiego argumentu) używają **`organizations`** — mniej problemów niż `common` przy device flow. Konto wyłącznie osobiste: `/microsoft-set-client <UUID> consumers` i redirect `.../consumers/...`.
 2. **Authentication → Allow public client flows:** **Yes**.
 3. **Platform „Mobile and desktop applications”:** zarejestruj **dokładnie jeden** redirect URI zgodny z `MICROSOFT_TENANT_ID` (to samo co w `/microsoft-show-settings`): `https://login.microsoftonline.com/<tenant>/oauth2/nativeclient` gdzie `<tenant>` to `common`, `organizations`, `consumers` albo **GUID** katalogu. **Nie** dodawaj jednocześnie kilku segmentów (`common` + `organizations` + `consumers`) — przy `authority=common` Microsoft potrafi przekierować na inny host z **niepełnym** żądaniem i wtedy pojawia się błąd o **`response_type`** / 404. Konto służbowe: ustaw w agencie `organizations` i w Azure **tylko** `.../organizations/oauth2/nativeclient`; konto osobiste: `consumers` + tylko `.../consumers/...`; mieszane: `common` + tylko `.../common/...`.
 4. **Usuń** stary redirect **Web** na `https://mcp.jarvis1.net/.../oauth/callback` — nie jest używany i myli przepływ.

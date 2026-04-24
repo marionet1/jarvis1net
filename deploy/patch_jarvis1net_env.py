@@ -9,7 +9,7 @@ ENV_PATH = pathlib.Path("/home/jump/jarvis1net/.env")
 DEFAULTS: list[tuple[str, str]] = [
     ("MCP_SERVER_URL", "https://mcp.jarvis1.net"),
     ("AUDIT_LOG_PATH", "/home/jump/jarvis1net/logs/audit.jsonl"),
-    ("MICROSOFT_TENANT_ID", "common"),
+    ("MICROSOFT_TENANT_ID", "organizations"),
     (
         "MICROSOFT_GRAPH_SCOPES",
         "User.Read Mail.ReadWrite Mail.Send Calendars.ReadWrite Files.ReadWrite.All",

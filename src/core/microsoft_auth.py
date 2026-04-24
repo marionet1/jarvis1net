@@ -13,20 +13,19 @@ from .types import AgentConfig
 
 
 def _authority(tenant_id: str) -> str:
-    tid = (tenant_id or "common").strip() or "common"
+    # „common” bywa problematyczne przy device flow + koncie służbowym (dodatkowy krok MSA/nativeclient → invalid_request / response_type).
+    tid = (tenant_id or "organizations").strip() or "organizations"
     return f"https://login.microsoftonline.com/{tid}"
 
 
 def recommended_native_redirect_uri(tenant_id: str) -> str:
     """
-    The single redirect URI to register (Mobile and desktop) — must match
-    ``MICROSOFT_TENANT_ID`` exactly (same path segment as MSAL authority).
+    Jeden redirect URI (Mobile and desktop) — ten sam segment co ``MICROSOFT_TENANT_ID`` / authority.
 
-    Do **not** register common+organizations+consumers at once while using
-    ``common`` in the agent: Microsoft may bounce the browser to another host
-    with a broken authorize request → ``invalid_request`` / missing ``response_type``.
+    Dla kont **służbowych** preferuj ``organizations`` (nie ``common``): przy ``common`` Microsoft
+    bywa drugi krok logowania na ``nativeclient``, który u wielu osób kończy się błędem ``response_type``.
     """
-    tid = (tenant_id or "common").strip() or "common"
+    tid = (tenant_id or "organizations").strip() or "organizations"
     return f"https://login.microsoftonline.com/{tid}/oauth2/nativeclient"
 
 
@@ -44,27 +43,13 @@ _MSAL_SCOPE_BLOCKLIST = frozenset(s.casefold() for s in ("offline_access", "open
 
 
 def _msal_request_scopes(config: AgentConfig) -> list[str]:
-    """
-    Graph delegated scopes for MSAL.
-
-    Short names from config (e.g. ``Mail.Read``) are sent as v2 resource scopes
-    ``https://graph.microsoft.com/Mail.Read`` — the form Microsoft documents for
-    the device authorization endpoint; it avoids some STS edge cases with bare
-    suffix-only scopes across ``common`` / MSA transfer steps.
-    """
-    raw = [s.strip() for s in _scopes(config) if s.strip() and s.strip().casefold() not in _MSAL_SCOPE_BLOCKLIST]
-    if not raw:
+    """Krótkie nazwy delegated Graph (np. User.Read) — tak jak w oficjalnym przykładzie MSAL device flow; MSAL sam dokleja openid/profile/offline_access."""
+    out = [s.strip() for s in _scopes(config) if s.strip() and s.strip().casefold() not in _MSAL_SCOPE_BLOCKLIST]
+    if not out:
         raise RuntimeError(
             "Brak scope Graph po odfiltrowaniu zarezerwowanych (offline_access/openid/profile). "
             "Ustaw np. User.Read Mail.ReadWrite w /microsoft-set-scopes lub MICROSOFT_GRAPH_SCOPES."
         )
-    out: list[str] = []
-    for s in raw:
-        low = s.casefold()
-        if "://" in s or low.startswith("api://"):
-            out.append(s)
-        else:
-            out.append(f"https://graph.microsoft.com/{s}")
     return out
 
 
@@ -139,6 +124,9 @@ def run_device_code_login(config: AgentConfig, notify: Callable[[str], None]) ->
     vu = flow.get("verification_uri")
     if isinstance(vu, str) and vu.strip():
         notify("Adres strony logowania urządzenia (Microsoft):\n" + vu.strip())
+    vuc = flow.get("verification_uri_complete")
+    if isinstance(vuc, str) and vuc.strip():
+        notify("Opcja jednym linkiem (jeśli działa w Twojej przeglądarce):\n" + vuc.strip())
     result = app.acquire_token_by_device_flow(flow)
     _persist_cache(cache, config)
     if not result or "access_token" not in result:
@@ -146,11 +134,11 @@ def run_device_code_login(config: AgentConfig, notify: Callable[[str], None]) ->
         detail = r.get("error_description") or r.get("error") or "brak access_token"
         redir = recommended_native_redirect_uri(config.microsoft_tenant_id)
         hint = (
-            " Jeśli w przeglądarce jest błąd o „response_type” na …/oauth2/nativeclient: "
-            "spróbuj Edge/InPrivate; dla kont służbowych tenant organizations + redirect …/organizations/…; "
-            "w Azure: platforma Mobile and desktop, Allow public client flows, jeden redirect jak "
-            f"{redir!r}. Obejście bez przeglądarki na VPS: /microsoft-set-graph-token + "
-            "az account get-access-token --resource https://graph.microsoft.com -o tsv (na swoim PC)."
+            " Typowa przyczyna ekranu „phishing” + response_type: tenant „common” na koncie służbowym — "
+            "ustaw /microsoft-set-client <UUID> organizations i w Azure **jeden** redirect Mobile/desktop: "
+            "https://login.microsoftonline.com/organizations/oauth2/nativeclient (usuń common jeśli nie używasz MSA). "
+            f"Aktualny redirect dla Twojego tenantu w agencie: {redir!r}. "
+            "Albo: /microsoft-set-graph-token + az account get-access-token --resource https://graph.microsoft.com -o tsv."
         )
         raise RuntimeError(str(detail) + hint)
     claims = result.get("id_token_claims") or {}
