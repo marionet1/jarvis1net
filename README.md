@@ -1,15 +1,15 @@
-# jarvis1net
+# jarvis1net (repozytorium GitHub: **agent-jarvis1net**)
 
 Lekki asystent (OpenRouter) z opcjonalnym **Telegramem** / **CLI** i narzędziami **MCP** — tylko transport **stdio** do [`mcp-jarvis1net`](https://github.com/marionet1/mcp-jarvis1net).
 
-**Pełny stos Docker (zalecany), ścieżki, VPS:** [README nadrzędnego repozytorium jarvis-stack](https://github.com/marionet1/jarvis-stack/blob/main/README.md) (katalog nadrzędny w monoreo: `../README.md` lokalnie).
+**Pełny stos Docker (zalecany), ścieżki, VPS:** [README monorepo stack-jarvis1net](https://github.com/marionet1/stack-jarvis1net/blob/main/README.md) (lokalnie w klonie stosu: `../README.md`).
 
 ## Status (aktualny)
 
 | | |
 |--|--|
 | **MCP** | Tylko **stdio** — `node` + ścieżka do `mcp-jarvis1net/dist/index.js` (`MCP_STDIO_ARGS` w `.env`). Tryb HTTP usunięty. |
-| **Produkcja** | [jarvis-stack](https://github.com/marionet1/jarvis-stack): jeden obraz Docker z agentem + zbudowanym MCP w `/opt/mcp-jarvis1net`. |
+| **Produkcja** | [stack-jarvis1net](https://github.com/marionet1/stack-jarvis1net): jeden obraz Docker z agentem + zbudowanym MCP w `/opt/mcp-jarvis1net`. |
 | **Python** | 3.12+ |
 | **MCP lokalnie** | Osobno: **Node 20+** + **npm** w katalogu `mcp-jarvis1net` — `npm install` / `npm run build` |
 
@@ -36,7 +36,7 @@ Lekki asystent (OpenRouter) z opcjonalnym **Telegramem** / **CLI** i narzędziam
 
 ## Docker: pełny stos (agent + MCP w jednym obrazie)
 
-W katalogu **nadrzędnym** do tego (repo **jarvis-stack**), gdzie leżą równolegle `jarvis1net/`, `mcp-jarvis1net/`, `Dockerfile`:
+W katalogu **nadrzędnym** do tego (repo **stack-jarvis1net**), gdzie leżą równolegle `jarvis1net/`, `mcp-jarvis1net/`, `Dockerfile`:
 
 ```bash
 cp jarvis1net/.env.example .env
@@ -47,7 +47,7 @@ docker compose build && docker compose up -d
 - Obraz: MCP w `/opt/mcp-jarvis1net`, domyślny `CMD` = `python3 src/telegram_bot.py`, dane: wolumen → `/app/data`.
 - Zamiast Telegrama w tym obrazie: `docker compose run --rm jarvis python3 src/main.py`
 
-Szczegóły: [jarvis-stack README](https://github.com/marionet1/jarvis-stack/blob/main/README.md).
+Szczegóły: [stack-jarvis1net README](https://github.com/marionet1/stack-jarvis1net/blob/main/README.md).
 
 ---
 
@@ -67,7 +67,7 @@ Windows (PowerShell): to samo z `py` zamiast `python3` i odpowiednią aktywacją
 
 ## Quick start lokalnie: agent + MCP (dwa katalogi / monoreo)
 
-1. Klon [jarvis-stack](https://github.com/marionet1/jarvis-stack) **z submodułami** (albo sklonuj `mcp-jarvis1net` obok `jarvis1net`).
+1. Klon [stack-jarvis1net](https://github.com/marionet1/stack-jarvis1net) **z submodułami** (albo sklonuj `mcp-jarvis1net` obok `jarvis1net`).
 2. W `mcp-jarvis1net/`: `npm install` i `npm run build` (wymaga **npm** i **Node 20+**).
 3. W `jarvis1net/.env` ustaw m.in.:
 
@@ -117,7 +117,7 @@ Pełny opis: [.env.example](.env.example).
 - Ścieżki: `AUDIT_LOG_PATH`, `SESSION_CONTEXT_PATH` (opcjonalnie)
 - MCP: `MCP_STDIO_COMMAND`, `MCP_STDIO_ARGS` / `MCP_STDIO_NODE_SCRIPT`, `MCP_ALLOWED_ROOTS`, limity `MCP_*`
 - `DISPLAY_TIMEZONE` — IANA, np. `Europe/Warsaw`
-- Microsoft: `MICROSOFT_*` (device code, MSAL) — [README nadrzędny + Azure poniżej](https://github.com/marionet1/jarvis-stack)
+- Microsoft: `MICROSOFT_*` (device code, MSAL) — [README nadrzędny + Azure poniżej](https://github.com/marionet1/stack-jarvis1net)
 
 ## Microsoft Azure (device code) — checklista
 
@@ -141,4 +141,4 @@ Pełny opis: [.env.example](.env.example).
 
 ## Licencja
 
-Zgodnie z polityką repozytorium / głównego stosu (np. [jarvis-stack](https://github.com/marionet1/jarvis-stack)).
+Zgodnie z polityką repozytorium / głównego stosu (np. [stack-jarvis1net](https://github.com/marionet1/stack-jarvis1net)).
