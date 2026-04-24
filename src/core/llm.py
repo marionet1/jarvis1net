@@ -26,6 +26,7 @@ Rules:
 - For mail/calendar/OneDrive **create, update, delete, send**, prefer **`microsoft_graph_api`** with the correct Graph `path` and `method` (see Microsoft Graph REST docs); helper tools only cover simple reads/lists.
 - For **bulk** Graph reads (many folders/messages), use small ``$top`` (e.g. 25–50), ``$select`` with only needed fields, and iterate in steps — each tool JSON is **truncated** if too large, so prefer narrow queries over one giant response.
 - **Never** issue the same tool with the **same arguments** twice in one turn: if a result was truncated, narrow ``$select``/``$top`` or query the **next** folder id from an earlier response instead of repeating the identical GET.
+- **Mark many messages read/unread (or bulk PATCH on messages):** use ``$select=id`` only and ``$top`` at most **20** (not 50) per GET. After each GET, PATCH **every** returned id in follow-up tool calls **before** fetching the next page (``$skip`` or ``@odata.nextLink``). One huge GET can be truncated and you lose ids — then you cannot finish the job in one reply.
 """
 
 
@@ -146,7 +147,7 @@ def _truncate_tool_result_for_context(text: str, max_chars: int) -> str:
         return text
     note = (
         f"\n\n[_jarvis1net: obcięto wynik narzędzia do {max_chars} znaków (było {len(text)}). "
-        "Użyj mniejszego $top i węższego $select w zapytaniach Graph.]"
+        "Dla list maili: $select=id, $top≤20 na stronę, potem PATCH każdego id zanim pobierzesz kolejną stronę.]"
     )
     head = max(500, max_chars - len(note))
     return text[:head] + note

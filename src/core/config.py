@@ -34,11 +34,11 @@ def load_config() -> AgentConfig:
         mcp_max_tool_rounds = max(1, min(48, int(mcp_tool_rounds_raw)))
     except ValueError:
         mcp_max_tool_rounds = 18
-    mcp_tool_cap_raw = os.getenv("MCP_TOOL_RESULT_MAX_CHARS", "12000").strip()
+    mcp_tool_cap_raw = os.getenv("MCP_TOOL_RESULT_MAX_CHARS", "40000").strip()
     try:
-        mcp_tool_result_max_chars = max(2000, min(120_000, int(mcp_tool_cap_raw)))
+        mcp_tool_result_max_chars = max(4000, min(200_000, int(mcp_tool_cap_raw)))
     except ValueError:
-        mcp_tool_result_max_chars = 12_000
+        mcp_tool_result_max_chars = 40_000
 
     audit_log_path = os.getenv("AUDIT_LOG_PATH", "/home/jump/jarvis1net/logs/audit.jsonl")
     session_ctx_env = os.getenv("SESSION_CONTEXT_PATH", "").strip()
