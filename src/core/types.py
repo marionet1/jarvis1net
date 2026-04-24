@@ -14,3 +14,4 @@ class AgentConfig:
     mcp_timeout_sec: int
     mcp_max_tool_rounds: int
     session_context_path: str
+    microsoft_graph_access_token: str

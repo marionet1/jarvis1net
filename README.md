@@ -6,7 +6,7 @@ This release is a simple MVP focused on reliability and clean self-hosted setup.
 ## What It Does
 
 - Provides conversational responses through OpenRouter (CLI + Telegram).
-- Optional **MCP filesystem tools** over HTTP when `MCP_API_KEY` is set (private hosted MCP service).
+- Optional **MCP tools** over HTTP when `MCP_API_KEY` is set (private hosted MCP service), including **`microsoft_*`** when you set **`MICROSOFT_GRAPH_ACCESS_TOKEN`** (the agent sends it to MCP as `X-Graph-Authorization`, so each deployment can use a different Microsoft user).
 - Short **session chat history** (same Telegram chat / CLI session), persisted to a small JSON file next to audit logs.
 - Writes basic audit events to a JSONL log file.
 
@@ -54,6 +54,7 @@ To request an API key, send a DM on GitHub: [github.com/marionet1](https://githu
 - `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOWED_CHAT_IDS`, `TELEGRAM_POLLING_TIMEOUT_SEC`
 - `AUDIT_LOG_PATH`, `SESSION_CONTEXT_PATH` (optional)
 - `MCP_SERVER_URL`, `MCP_API_KEY`, `MCP_TIMEOUT_SEC`, `MCP_MAX_TOOL_ROUNDS`
+- `MICROSOFT_GRAPH_ACCESS_TOKEN` (optional): delegated Graph access token for this agent; required for Microsoft tools — MCP has no Microsoft credentials and only proxies Graph when the agent sends this token as `X-Graph-Authorization`.
 
 ## Security Notes
 

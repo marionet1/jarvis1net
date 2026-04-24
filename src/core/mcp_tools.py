@@ -27,11 +27,20 @@ def mcp_get(config: AgentConfig, path: str, params: dict[str, Any] | None = None
     return response.json()
 
 
-def mcp_post_json(config: AgentConfig, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+def mcp_post_json(
+    config: AgentConfig,
+    path: str,
+    payload: dict[str, Any],
+    *,
+    extra_headers: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    headers = {**_auth_headers(config), "Content-Type": "application/json"}
+    if extra_headers:
+        headers.update(extra_headers)
     response = requests.post(
         f"{config.mcp_server_url}{path}",
         json=payload,
-        headers={**_auth_headers(config), "Content-Type": "application/json"},
+        headers=headers,
         timeout=config.mcp_timeout_sec,
     )
     response.raise_for_status()
@@ -70,7 +79,12 @@ def run_mcp_tool(name: str, arguments: dict[str, Any], config: AgentConfig) -> s
     """Runs one MCP tool call via generic /v1/tools/call and returns JSON for role=tool."""
     try:
         payload = {"name": name, "arguments": arguments or {}}
-        out = mcp_post_json(config, "/v1/tools/call", payload)
+        extra: dict[str, str] | None = None
+        if name.startswith("microsoft_") and config.microsoft_graph_access_token:
+            raw = config.microsoft_graph_access_token.strip()
+            bearer = raw if raw.lower().startswith("bearer ") else f"Bearer {raw}"
+            extra = {"X-Graph-Authorization": bearer}
+        out = mcp_post_json(config, "/v1/tools/call", payload, extra_headers=extra)
         if isinstance(out, dict) and isinstance(out.get("result"), dict):
             return json.dumps(out["result"], ensure_ascii=False)
         return json.dumps(out, ensure_ascii=False)

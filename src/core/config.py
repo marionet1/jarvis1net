@@ -33,6 +33,8 @@ def load_config() -> AgentConfig:
     else:
         session_context_path = str(Path(audit_log_path).expanduser().resolve().parent / "session_paths.json")
 
+    graph_token = os.getenv("MICROSOFT_GRAPH_ACCESS_TOKEN", "").strip()
+
     return AgentConfig(
         model=os.getenv("MODEL", "o4-mini"),
         openrouter_api_key=os.getenv("OPENROUTER_API_KEY", ""),
@@ -45,4 +47,5 @@ def load_config() -> AgentConfig:
         mcp_timeout_sec=mcp_timeout,
         mcp_max_tool_rounds=mcp_max_tool_rounds,
         session_context_path=session_context_path,
+        microsoft_graph_access_token=graph_token,
     )
