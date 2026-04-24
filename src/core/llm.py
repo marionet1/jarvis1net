@@ -100,7 +100,43 @@ def _simple_responses_reply(user_input: str, model: str, config: AgentConfig) ->
         return (
             "The intent is unclear. Please specify the goal, for example a file path or directory."
         )
-    return text
+    foot = _usage_footer_from_responses_api(response)
+    return text + foot if foot else text
+
+
+def _usage_footer_cumulative(prompt: int, completion: int, rounds: int, *, limit_hit: bool = False) -> str:
+    if rounds <= 0:
+        return ""
+    total = prompt + completion
+    if prompt == 0 and completion == 0:
+        base = "\n\n— Tokeny: brak pola usage w odpowiedziach API (OpenRouter czasem nie zwraca usage)."
+    else:
+        base = (
+            f"\n\n— Tokeny (łącznie w tej odpowiedzi, suma z {rounds} wywołań modelu): "
+            f"prompt≈{prompt}, completion≈{completion}, razem≈{total}."
+        )
+    if limit_hit:
+        base += " Osiągnięto MCP_MAX_TOOL_ROUNDS — ustaw wyższą wartość w .env (np. 24) lub podziel zadanie."
+    return base
+
+
+def _usage_footer_from_responses_api(response: Any) -> str:
+    u = getattr(response, "usage", None)
+    if u is None:
+        return ""
+    inp = getattr(u, "input_tokens", None)
+    if inp is None:
+        inp = getattr(u, "prompt_tokens", None)
+    out = getattr(u, "output_tokens", None)
+    if out is None:
+        out = getattr(u, "completion_tokens", None)
+    pt = int(inp or 0)
+    ct = int(out or 0)
+    tt = getattr(u, "total_tokens", None)
+    total = int(tt) if tt is not None else pt + ct
+    if pt == 0 and ct == 0 and total == 0:
+        return ""
+    return f"\n\n— Tokeny (ta odpowiedź, API): wejście≈{pt}, wyjście≈{ct}, suma≈{total}."
 
 
 def _truncate_tool_result_for_context(text: str, max_chars: int) -> str:
@@ -170,6 +206,9 @@ def _chat_tool_loop(
     # W jednej odpowiedzi na użytkownika: identyczne wywołanie (np. ten sam GET Graph) nie idzie drugi raz do MCP —
     # model często zapętla się, gdy wynik był obcięty lub nie przeczytał listy folderów.
     tool_result_cache: dict[str, str] = {}
+    usage_prompt = 0
+    usage_completion = 0
+    model_rounds = 0
 
     for _ in range(max_rounds):
         try:
@@ -185,7 +224,16 @@ def _chat_tool_loop(
                 max_tokens=4096,
             )
         except Exception as exc:
-            return f"Model call error (chat + tools): {exc}"
+            return (
+                f"Model call error (chat + tools): {exc}"
+                + _usage_footer_cumulative(usage_prompt, usage_completion, model_rounds)
+            )
+
+        model_rounds += 1
+        u = getattr(completion, "usage", None)
+        if u is not None:
+            usage_prompt += int(getattr(u, "prompt_tokens", 0) or 0)
+            usage_completion += int(getattr(u, "completion_tokens", 0) or 0)
 
         choice = completion.choices[0]
         msg = choice.message
@@ -237,13 +285,15 @@ def _chat_tool_loop(
             continue
 
         text = (msg.content or "").strip()
+        foot = _usage_footer_cumulative(usage_prompt, usage_completion, model_rounds)
         if text:
-            return text
-        return "Model finished without text output. Please clarify the request."
+            return text + foot
+        return "Model finished without text output. Please clarify the request." + foot
 
     return (
         f"Tool round limit exceeded ({max_rounds}). "
         "Split the request into smaller steps or narrow down paths."
+        + _usage_footer_cumulative(usage_prompt, usage_completion, model_rounds, limit_hit=True)
     )
 
 

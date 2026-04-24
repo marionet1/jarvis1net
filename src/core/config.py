@@ -26,11 +26,11 @@ def load_config() -> AgentConfig:
         mcp_timeout = max(3, int(mcp_timeout_raw))
     except ValueError:
         mcp_timeout = 15
-    mcp_tool_rounds_raw = os.getenv("MCP_MAX_TOOL_ROUNDS", "10").strip()
+    mcp_tool_rounds_raw = os.getenv("MCP_MAX_TOOL_ROUNDS", "18").strip()
     try:
-        mcp_max_tool_rounds = max(1, min(32, int(mcp_tool_rounds_raw)))
+        mcp_max_tool_rounds = max(1, min(48, int(mcp_tool_rounds_raw)))
     except ValueError:
-        mcp_max_tool_rounds = 10
+        mcp_max_tool_rounds = 18
     mcp_tool_cap_raw = os.getenv("MCP_TOOL_RESULT_MAX_CHARS", "12000").strip()
     try:
         mcp_tool_result_max_chars = max(2000, min(120_000, int(mcp_tool_cap_raw)))
