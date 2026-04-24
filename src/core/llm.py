@@ -25,9 +25,11 @@ Rules:
 - Do not claim an operation was performed unless you actually executed the appropriate tool.
 - For Microsoft mailbox/calendar/OneDrive (`microsoft_*` tools), if tools report missing Graph token, tell the user to run **/microsoft-set-client** (paste Azure Client ID) then **/microsoft-login** in Telegram, or set env vars on the agent host.
 - For mail/calendar/OneDrive **create, update, delete, send**, prefer **`microsoft_graph_api`** with the correct Graph `path` and `method` (see Microsoft Graph REST docs); helper tools only cover simple reads/lists.
+- To **mark many messages read**, after a GET with `value` of unread messages call **`microsoft_mail_mark_read`** with **all** `value[].id` strings in one `message_ids` array (repeat for next pages). Do **not** answer “all marked” after a single `PATCH` unless `value` had exactly one item or you used `microsoft_mail_mark_read` covering every id.
 - For **bulk** Graph reads (many folders/messages), use small ``$top`` (e.g. 25–50), ``$select`` with only needed fields, and iterate in steps — each tool JSON is **truncated** if too large, so prefer narrow queries over one giant response.
 - **Never** issue the same tool with the **same arguments** twice in one turn: if a result was truncated, narrow ``$select``/``$top`` or query the **next** folder id from an earlier response instead of repeating the identical GET.
 - **Mark many messages read/unread (or bulk PATCH on messages):** use ``$select=id`` only and ``$top`` at most **20** (not 50) per GET. After each GET, PATCH **every** returned id in follow-up tool calls **before** fetching the next page (``$skip`` or ``@odata.nextLink``). One huge GET can be truncated and you lose ids — then you cannot finish the job in one reply.
+- **Mark one message read in Graph:** ``PATCH`` path ``/me/messages/{id}`` or ``/me/mailFolders/{folderId}/messages/{id}`` with JSON body exactly ``{"isRead": true}`` (boolean, key name ``isRead``). Success from the tool is usually ``{"ok": true, "status_code": 204}``. If the user says Outlook still shows unread, you may ``GET`` the same ``/me/messages/{id}?$select=isRead`` and report that JSON; do not claim success without that PATCH result in the tool output.
 """
 
 
@@ -189,10 +191,12 @@ def _graph_unread_messages_loose_key(name: str, args: dict[str, Any]) -> str | N
 
 
 def _graph_patch_to_message(path: str, method: str) -> bool:
+    """True when PATCH targets a message resource (clears Graph GET soft-cache)."""
     if str(method).strip().upper() != "PATCH":
         return False
     pl = path.casefold()
-    return "/mailfolders/" in pl and "/messages/" in pl
+    # /me/messages/{id} OR /me/mailFolders/.../messages/{id} (not only the latter)
+    return "/messages/" in pl
 
 
 def _format_mcp_tool_round(tool_calls: Any) -> str:
@@ -334,13 +338,14 @@ def _chat_tool_loop(
                 if dup_note:
                     clipped = clipped + dup_note
                 messages.append({"role": "tool", "tool_call_id": tc.id, "content": clipped})
-                if name == "microsoft_graph_api" and _graph_patch_to_message(
-                    str(args.get("path", "")), str(args.get("method", ""))
+                if name == "microsoft_mail_mark_read" or (
+                    name == "microsoft_graph_api"
+                    and _graph_patch_to_message(str(args.get("path", "")), str(args.get("method", "")))
                 ):
                     graph_read_generation += 1
                     graph_unread_soft_cache.clear()
                     for k in list(tool_result_cache.keys()):
-                        if k.startswith("microsoft_graph_api\0"):
+                        if k.startswith("microsoft_graph_api\0") or k.startswith("microsoft_mail_mark_read\0"):
                             tool_result_cache.pop(k, None)
             continue
 
