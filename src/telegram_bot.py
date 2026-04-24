@@ -99,6 +99,8 @@ def process_message(
             "jarvis1net — limity MCP w tej instancji:\n"
             f"- MCP_MAX_TOOL_ROUNDS (efektywnie): {config.mcp_max_tool_rounds}\n"
             f"- MCP_TOOL_RESULT_MAX_CHARS: {config.mcp_tool_result_max_chars}\n"
+            f"- MCP_MICROSOFT_TOOL_RESULT_MAX_CHARS (wyniki microsoft_*): {config.mcp_microsoft_tool_result_max_chars}\n"
+            f"- MCP_CHAT_COMPLETION_MAX_TOKENS: {config.mcp_chat_completion_max_tokens}\n"
             f"- MCP_TIMEOUT_SEC: {config.mcp_timeout_sec}\n"
             f"- Plik .env: {Path(__file__).resolve().parents[1] / '.env'}\n"
             "Zmiana: edytuj .env w katalogu repo (nie src/) i zrestartuj bota."

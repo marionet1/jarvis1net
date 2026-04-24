@@ -40,6 +40,20 @@ def load_config() -> AgentConfig:
     except ValueError:
         mcp_tool_result_max_chars = 40_000
 
+    ms_tool_cap_raw = os.getenv("MCP_MICROSOFT_TOOL_RESULT_MAX_CHARS", "12000").strip()
+    try:
+        mcp_microsoft_tool_result_max_chars = max(
+            3000, min(mcp_tool_result_max_chars, int(ms_tool_cap_raw))
+        )
+    except ValueError:
+        mcp_microsoft_tool_result_max_chars = min(12_000, mcp_tool_result_max_chars)
+
+    chat_max_out_raw = os.getenv("MCP_CHAT_COMPLETION_MAX_TOKENS", "10240").strip()
+    try:
+        mcp_chat_completion_max_tokens = max(2048, min(32_768, int(chat_max_out_raw)))
+    except ValueError:
+        mcp_chat_completion_max_tokens = 10_240
+
     audit_log_path = os.getenv("AUDIT_LOG_PATH", "/home/jump/jarvis1net/logs/audit.jsonl")
     session_ctx_env = os.getenv("SESSION_CONTEXT_PATH", "").strip()
     if session_ctx_env:
@@ -96,6 +110,8 @@ def load_config() -> AgentConfig:
         mcp_timeout_sec=mcp_timeout,
         mcp_max_tool_rounds=mcp_max_tool_rounds,
         mcp_tool_result_max_chars=mcp_tool_result_max_chars,
+        mcp_microsoft_tool_result_max_chars=mcp_microsoft_tool_result_max_chars,
+        mcp_chat_completion_max_tokens=mcp_chat_completion_max_tokens,
         session_context_path=session_context_path,
         microsoft_graph_access_token=graph_token,
         microsoft_client_id=ms_client,

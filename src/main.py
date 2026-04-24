@@ -95,6 +95,8 @@ def main() -> None:
             print("jarvis1net — limity MCP:")
             print(f"  MCP_MAX_TOOL_ROUNDS: {config.mcp_max_tool_rounds}")
             print(f"  MCP_TOOL_RESULT_MAX_CHARS: {config.mcp_tool_result_max_chars}")
+            print(f"  MCP_MICROSOFT_TOOL_RESULT_MAX_CHARS: {config.mcp_microsoft_tool_result_max_chars}")
+            print(f"  MCP_CHAT_COMPLETION_MAX_TOKENS: {config.mcp_chat_completion_max_tokens}")
             print(f"  MCP_TIMEOUT_SEC: {config.mcp_timeout_sec}\n")
             continue
 

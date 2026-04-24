@@ -27,6 +27,7 @@ Rules:
 - For mail/calendar/OneDrive **create, update, delete, send**, prefer **`microsoft_graph_api`** with the correct Graph `path` and `method` (see Microsoft Graph REST docs); helper tools only cover simple reads/lists.
 - To **mark many messages read**, after a GET with `value` of unread messages call **`microsoft_mail_mark_read`** with **all** `value[].id` strings in one `message_ids` array (repeat for next pages). Do **not** answer “all marked” after a single `PATCH` unless `value` had exactly one item or you used `microsoft_mail_mark_read` covering every id.
 - For **bulk** Graph reads (many folders/messages), use small ``$top`` (e.g. 25–50), ``$select`` with only needed fields, and iterate in steps — each tool JSON is **truncated** if too large, so prefer narrow queries over one giant response.
+- **Mailbox bulk work (step-by-step in one reply):** do **not** use deep ``$expand=childFolders`` on large trees in the same round as listing all message bodies. Prefer ``GET /me/mailFolders/inbox/childFolders?$select=id,displayName,unreadItemCount`` **without** expand. Then **one folder at a time**: for the next folder id with ``unreadItemCount>0``, ``GET .../mailFolders/{id}/messages?$filter=isRead eq false&$select=id&$top=15``, then ``microsoft_mail_mark_read`` with those ids (and ``mail_folder_id`` if PATCH is flaky). Repeat GET+mark for the next folder — **few tool calls per model round** (e.g. 1–2) so context stays small.
 - **Never** issue the same tool with the **same arguments** twice in one turn: if a result was truncated, narrow ``$select``/``$top`` or query the **next** folder id from an earlier response instead of repeating the identical GET.
 - **Mark many messages read/unread (or bulk PATCH on messages):** use ``$select=id`` only and ``$top`` at most **20** (not 50) per GET. After each GET, PATCH **every** returned id in follow-up tool calls **before** fetching the next page (``$skip`` or ``@odata.nextLink``). One huge GET can be truncated and you lose ids — then you cannot finish the job in one reply.
 - **Mark one message read in Graph:** ``PATCH`` path ``/me/messages/{id}`` or ``/me/mailFolders/{folderId}/messages/{id}`` with JSON body exactly ``{"isRead": true}`` (boolean, key name ``isRead``). Success from the tool is usually ``{"ok": true, "status_code": 204}``. If the user says Outlook still shows unread, you may ``GET`` the same ``/me/messages/{id}?$select=isRead`` and report that JSON; do not claim success without that PATCH result in the tool output.
@@ -141,6 +142,54 @@ def _usage_footer_from_responses_api(response: Any) -> str:
     if pt == 0 and ct == 0 and total == 0:
         return ""
     return f"\n\n— Tokeny (ta odpowiedź, API): wejście≈{pt}, wyjście≈{ct}, suma≈{total}."
+
+
+_MAX_GRAPH_VALUE_ITEMS = 22
+_MAX_GRAPH_CHILD_FOLDERS_ITEMS = 12
+
+
+def _shrink_microsoft_graph_json_payload(obj: Any) -> Any:
+    """Reduces huge OData `value` / nested `childFolders` arrays before token-heavy tool messages."""
+    if isinstance(obj, dict):
+        out: dict[str, Any] = {}
+        for k, v in obj.items():
+            if k == "value" and isinstance(v, list) and len(v) > _MAX_GRAPH_VALUE_ITEMS:
+                out[k] = [_shrink_microsoft_graph_json_payload(x) for x in v[:_MAX_GRAPH_VALUE_ITEMS]]
+                out["_jarvis1net_truncated_value_total"] = len(v)
+            elif k == "childFolders" and isinstance(v, list) and len(v) > _MAX_GRAPH_CHILD_FOLDERS_ITEMS:
+                out[k] = [_shrink_microsoft_graph_json_payload(x) for x in v[:_MAX_GRAPH_CHILD_FOLDERS_ITEMS]]
+                out["_jarvis1net_truncated_childFolders_total"] = len(v)
+            else:
+                out[k] = _shrink_microsoft_graph_json_payload(v)
+        return out
+    if isinstance(obj, list):
+        return [_shrink_microsoft_graph_json_payload(x) for x in obj]
+    return obj
+
+
+def _maybe_shrink_microsoft_tool_json(name: str, raw: str) -> str:
+    if not name.startswith("microsoft_"):
+        return raw
+    text = raw.strip()
+    if not text.startswith("{"):
+        return raw
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        return raw
+    if not isinstance(data, dict):
+        return raw
+    shrunk = _shrink_microsoft_graph_json_payload(data)
+    try:
+        return json.dumps(shrunk, ensure_ascii=False)
+    except (TypeError, ValueError):
+        return raw
+
+
+def _tool_result_char_cap(name: str, config: AgentConfig) -> int:
+    if name.startswith("microsoft_"):
+        return min(config.mcp_tool_result_max_chars, config.mcp_microsoft_tool_result_max_chars)
+    return config.mcp_tool_result_max_chars
 
 
 def _truncate_tool_result_for_context(text: str, max_chars: int) -> str:
@@ -263,7 +312,7 @@ def _chat_tool_loop(
                 messages=messages,
                 tools=mcp_tools,
                 tool_choice=tool_choice,
-                max_tokens=4096,
+                max_tokens=config.mcp_chat_completion_max_tokens,
             )
         except Exception as exc:
             return (
@@ -334,7 +383,8 @@ def _chat_tool_loop(
                     else:
                         raw = run_mcp_tool(name, args, config)
                         tool_result_cache[sig] = raw
-                clipped = _truncate_tool_result_for_context(raw, config.mcp_tool_result_max_chars)
+                shrunk = _maybe_shrink_microsoft_tool_json(name, raw)
+                clipped = _truncate_tool_result_for_context(shrunk, _tool_result_char_cap(name, config))
                 if dup_note:
                     clipped = clipped + dup_note
                 messages.append({"role": "tool", "tool_call_id": tc.id, "content": clipped})
@@ -353,7 +403,19 @@ def _chat_tool_loop(
         foot = _usage_footer_cumulative(usage_prompt, usage_completion, model_rounds)
         if text:
             return text + foot
-        return "Model finished without text output. Please clarify the request." + foot
+        fr = getattr(choice, "finish_reason", None)
+        if fr == "length":
+            return (
+                "Model zatrzymał się na limicie długości odpowiedzi (max_tokens) — zwykle przy bardzo długich "
+                "wywołaniach narzędzi lub ogromnym JSON z Graph. Napisz proszę węższe polecenie (np. tylko jeden "
+                "folder / „oznacz przeczytane w controlek@gmail.com”) albo kontynuuj „dalej”. "
+                "Administrator może zwiększyć MCP_CHAT_COMPLETION_MAX_TOKENS lub zmniejszyć zakres list maili."
+                + foot
+            )
+        return (
+            "Model nie zwrócił treści (pusty content). Spróbuj krótszego polecenia lub podziel zadanie na kroki."
+            + foot
+        )
 
     return (
         f"Tool round limit exceeded ({max_rounds}). "
