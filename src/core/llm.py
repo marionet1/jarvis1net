@@ -6,7 +6,7 @@ from urllib.parse import parse_qsl, unquote
 
 from openai import OpenAI
 
-from .mcp_tools import load_mcp_tools, run_mcp_tool
+from .mcp_tools import filter_mcp_tools_when_graph_token_present, load_mcp_tools, run_mcp_tool
 from .session_context import get_session_store
 from .types import AgentConfig
 
@@ -24,6 +24,7 @@ Rules:
 - After tool calls, summarize clearly what was done, which paths were used, and any HTTP/tool errors.
 - Do not claim an operation was performed unless you actually executed the appropriate tool.
 - For Microsoft mailbox/calendar/OneDrive (`microsoft_*` tools), if tools report missing Graph token, tell the user to run **/microsoft-set-client** (paste Azure Client ID) then **/microsoft-login** in Telegram, or set env vars on the agent host.
+- **Microsoft:** go straight to the concrete `microsoft_*` tool the user needs (for example `microsoft_graph_api` or `microsoft_graph_me`). Call **`microsoft_integration_status` only if it still appears in the tool list and you must diagnose missing Graph token** — never as a routine first step before every mail/calendar action.
 - For mail/calendar/OneDrive **create, update, delete, send**, prefer **`microsoft_graph_api`** with the correct Graph `path` and `method` (see Microsoft Graph REST docs); helper tools only cover simple reads/lists.
 - **Mail list / “pokaż ostatnie N maili” (bez czytania treści):** używaj GET na wiadomościach z ``$select=id,subject,receivedDateTime,from`` (pole ``from`` zwraca adres/nazwę nadawcy). **Nie** dodawaj ``bodyPreview``, ``body`` ani ``uniqueBody``, dopóki użytkownik wyraźnie nie poprosi o treść / odczytanie konkretnej wiadomości — inaczej wynik narzędzia bywa obcięty i giną kolejne maile. Ustaw ``$top`` równy liczbie prośby (np. dwa ostatnie → ``$top=2``).
 - To **mark many messages read**, after a GET with `value` of unread messages call **`microsoft_mail_mark_read`** with **all** `value[].id` strings in one `message_ids` array (repeat for next pages). Do **not** answer “all marked” after a single `PATCH` unless `value` had exactly one item or you used `microsoft_mail_mark_read` covering every id.
@@ -295,7 +296,7 @@ def _chat_tool_loop(
     ]
     max_rounds = config.mcp_max_tool_rounds
     try:
-        mcp_tools = load_mcp_tools(config)
+        mcp_tools = filter_mcp_tools_when_graph_token_present(config, load_mcp_tools(config))
     except Exception as exc:
         return f"MCP tools manifest error: {exc}"
     if not mcp_tools:

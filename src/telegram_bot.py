@@ -15,7 +15,7 @@ from core.agent import run_agent_turn
 from core.audit import write_audit_event
 from core.config import load_config
 from core.llm import get_llm_reply
-from core.mcp_tools import load_mcp_tools
+from core.mcp_tools import filter_mcp_tools_when_graph_token_present, load_mcp_tools
 from core.types import AgentConfig
 from core.microsoft_auth import (
     clear_token_cache_file,
@@ -196,7 +196,7 @@ def build_info_html_chunks(config: AgentConfig) -> list[str]:
         return [one]
 
     try:
-        tools = load_mcp_tools(config)
+        tools = filter_mcp_tools_when_graph_token_present(config, load_mcp_tools(config))
     except Exception as exc:
         err = html.escape(str(exc)[:500])
         one = (current + f"<b>MCP</b>: <i>nie udało się pobrać manifestu:</i>\n<pre>{err}</pre>")[:_INFO_HTML_MAX]

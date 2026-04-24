@@ -76,6 +76,25 @@ def load_mcp_tools(config: AgentConfig) -> list[dict[str, Any]]:
     return tools
 
 
+def filter_mcp_tools_when_graph_token_present(
+    config: AgentConfig, tools: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Jeśli agent już dołącza token Graph, `microsoft_integration_status` jest zbędne — usuwa je z manifestu.
+
+    To zmniejsza rozmiar listy `tools` w każdym wywołaniu chat completions i zapobiega „preambule”
+    z pustym `{}` przed każdą operacją Microsoft.
+    """
+    if not resolve_graph_access_token(config):
+        return tools
+    out: list[dict[str, Any]] = []
+    for item in tools:
+        fn = item.get("function")
+        if isinstance(fn, dict) and fn.get("name") == "microsoft_integration_status":
+            continue
+        out.append(item)
+    return out
+
+
 def run_mcp_tool(name: str, arguments: dict[str, Any], config: AgentConfig) -> str:
     """Runs one MCP tool call via generic /v1/tools/call and returns JSON for role=tool."""
     try:
