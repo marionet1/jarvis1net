@@ -139,7 +139,7 @@ def process_message(
             f"- Źródło Client ID: {src}",
             f"- Tenant: {config.microsoft_tenant_id}",
             f"- Scope: {' '.join(config.microsoft_graph_scopes)}",
-            "- W Azure (Mobile/desktop) zarejestruj KAŻDY z tych redirectów (osobno):",
+            "- W Azure (Mobile/desktop) zarejestruj dokładnie TEN redirect (jeden wpis, zgodny z tenantem):",
             redir_lines,
             f"- Plik ustawień: {settings_path(config.audit_log_path)}",
             f"- Cache tokenów MSAL: {'tak' if has_cache else 'nie'}",

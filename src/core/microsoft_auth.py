@@ -17,28 +17,22 @@ def _authority(tenant_id: str) -> str:
     return f"https://login.microsoftonline.com/{tid}"
 
 
-def recommended_native_redirect_uris(tenant_id: str) -> list[str]:
+def recommended_native_redirect_uri(tenant_id: str) -> str:
     """
-    Redirect URIs to register under *Mobile and desktop applications* in Azure.
+    The single redirect URI to register (Mobile and desktop) — must match
+    ``MICROSOFT_TENANT_ID`` exactly (same path segment as MSAL authority).
 
-    When authority uses ``common``, Microsoft may finish the browser step on
-    ``/common/``, ``/organizations/``, or ``/consumers/`` nativeclient depending on
-    account type — only having ``/common/`` registered causes ``invalid_request``
-    on the other hosts.
+    Do **not** register common+organizations+consumers at once while using
+    ``common`` in the agent: Microsoft may bounce the browser to another host
+    with a broken authorize request → ``invalid_request`` / missing ``response_type``.
     """
     tid = (tenant_id or "common").strip() or "common"
-    if tid.casefold() == "common":
-        return [
-            "https://login.microsoftonline.com/common/oauth2/nativeclient",
-            "https://login.microsoftonline.com/organizations/oauth2/nativeclient",
-            "https://login.microsoftonline.com/consumers/oauth2/nativeclient",
-        ]
-    return [f"https://login.microsoftonline.com/{tid}/oauth2/nativeclient"]
+    return f"https://login.microsoftonline.com/{tid}/oauth2/nativeclient"
 
 
-def recommended_native_redirect_uri(tenant_id: str) -> str:
-    """First (primary) native redirect; prefer registering all from `recommended_native_redirect_uris`."""
-    return recommended_native_redirect_uris(tenant_id)[0]
+def recommended_native_redirect_uris(tenant_id: str) -> list[str]:
+    """Single-element list for display (one redirect URI per authority)."""
+    return [recommended_native_redirect_uri(tenant_id)]
 
 
 def _scopes(config: AgentConfig) -> list[str]:
@@ -136,11 +130,12 @@ def run_device_code_login(config: AgentConfig, notify: Callable[[str], None]) ->
     if not result or "access_token" not in result:
         r = result or {}
         detail = r.get("error_description") or r.get("error") or "brak access_token"
-        uris = recommended_native_redirect_uris(config.microsoft_tenant_id)
+        redir = recommended_native_redirect_uri(config.microsoft_tenant_id)
         hint = (
-            " Jeśli w przeglądarce było nativeclient + invalid_request: w Azure (Mobile and desktop) "
-            "zarejestruj WSZYSTKIE poniższe URI (osobne wpisy): "
-            + " | ".join(uris)
+            " Jeśli widzisz m.in. „response_type”: w Azure usuń **zbędne** native redirecty — "
+            "zostaw **jeden** zgodny z tenantem agenta (np. tylko .../organizations/... gdy używasz "
+            "`/microsoft-set-client … organizations`). Zarejestruj dokładnie: "
+            f"{redir!r}"
         )
         raise RuntimeError(str(detail) + hint)
     claims = result.get("id_token_claims") or {}
