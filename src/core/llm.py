@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from typing import Any, Callable
+from urllib.parse import parse_qsl, unquote
 
 from openai import OpenAI
 
@@ -161,6 +162,39 @@ def _tool_call_signature(name: str, args: dict[str, Any]) -> str:
     return f"{name}\0{payload}"
 
 
+def _graph_unread_messages_loose_key(name: str, args: dict[str, Any]) -> str | None:
+    """
+    Model często powtarza GET .../messages?$filter=isRead eq false zmieniając tylko $top (8 vs 20) —
+    to ta sama lista w tym samym momencie; traktujemy jak jedno zapytanie (do czasu PATCH).
+    """
+    if name != "microsoft_graph_api":
+        return None
+    if str(args.get("method", "GET")).strip().upper() != "GET":
+        return None
+    raw_path = str(args.get("path", "")).strip()
+    if "/messages" not in raw_path or "?" not in raw_path:
+        return None
+    base, q = raw_path.split("?", 1)
+    try:
+        pairs = dict(parse_qsl(unquote(q), keep_blank_values=True))
+    except (TypeError, ValueError):
+        return None
+    filt = str(pairs.get("$filter") or pairs.get("filter") or "")
+    if "isread" not in filt.casefold() or "false" not in filt.casefold():
+        return None
+    skip = str(pairs.get("$skip") or pairs.get("skip") or "")
+    skiptoken = str(pairs.get("$skiptoken") or "")
+    page = skip or skiptoken
+    return f"mg:unread:{base}\0{filt}\0page:{page}"
+
+
+def _graph_patch_to_message(path: str, method: str) -> bool:
+    if str(method).strip().upper() != "PATCH":
+        return False
+    pl = path.casefold()
+    return "/mailfolders/" in pl and "/messages/" in pl
+
+
 def _format_mcp_tool_round(tool_calls: Any) -> str:
     """Text shown to the user before executing an MCP tool round."""
     lines = ["Using mcp-jarvis1net"]
@@ -207,6 +241,9 @@ def _chat_tool_loop(
     # W jednej odpowiedzi na użytkownika: identyczne wywołanie (np. ten sam GET Graph) nie idzie drugi raz do MCP —
     # model często zapętla się, gdy wynik był obcięty lub nie przeczytał listy folderów.
     tool_result_cache: dict[str, str] = {}
+    # GET nieprzeczytanych: ten sam folder+filter+strona, inne $top → bez ponownego HTTP; po PATCH generacja rośnie.
+    graph_read_generation = 0
+    graph_unread_soft_cache: dict[str, tuple[str, int]] = {}
     usage_prompt = 0
     usage_completion = 0
     model_rounds = 0
@@ -270,7 +307,21 @@ def _chat_tool_loop(
                     raw = run_mcp_tool(name, args, config)
                 else:
                     sig = _tool_call_signature(name, args)
-                    if sig in tool_result_cache:
+                    loose = _graph_unread_messages_loose_key(name, args)
+                    if loose is not None:
+                        prev = graph_unread_soft_cache.get(loose)
+                        if prev is not None and prev[1] == graph_read_generation:
+                            raw = prev[0]
+                            dup_note = (
+                                "\n\n[_jarvis1net: ponowny GET nieprzeczytanych w tym samym folderze i filtrze "
+                                "(np. inne $top) — to ta sama lista. Zrób PATCH {\"isRead\": true} na każde id z value "
+                                "poprzedniej odpowiedzi, dopiero potem ewentualnie $skip / @odata.nextLink.]"
+                            )
+                        else:
+                            raw = run_mcp_tool(name, args, config)
+                            tool_result_cache[sig] = raw
+                            graph_unread_soft_cache[loose] = (raw, graph_read_generation)
+                    elif sig in tool_result_cache:
                         raw = tool_result_cache[sig]
                         dup_note = (
                             "\n\n[_jarvis1net: to samo wywołanie już było — nie powtarzaj. "
@@ -283,6 +334,14 @@ def _chat_tool_loop(
                 if dup_note:
                     clipped = clipped + dup_note
                 messages.append({"role": "tool", "tool_call_id": tc.id, "content": clipped})
+                if name == "microsoft_graph_api" and _graph_patch_to_message(
+                    str(args.get("path", "")), str(args.get("method", ""))
+                ):
+                    graph_read_generation += 1
+                    graph_unread_soft_cache.clear()
+                    for k in list(tool_result_cache.keys()):
+                        if k.startswith("microsoft_graph_api\0"):
+                            tool_result_cache.pop(k, None)
             continue
 
         text = (msg.content or "").strip()
