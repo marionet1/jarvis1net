@@ -11,10 +11,11 @@ from .types import AgentConfig
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
-FS_AGENT_SYSTEM = """You are the jarvis1net assistant with tools provided by MCP server manifest.
+MCP_AGENT_SYSTEM = """You are the jarvis1net assistant with tools provided by the MCP server.
 
 Rules:
 - Use previous turns from this session as conversation context.
+- When the user asks which MCP tools exist, what tools are available, or for an up-to-date tool list, **always call `mcp_refresh_tool_manifest` first** and answer only from that tool output (never from memory, never from earlier turns). The host app may also force that tool call before your first reply.
 - When the user asks for server-side file operations (list/read/write/create/delete/rename), **use tools** instead of guessing filesystem content.
 - For diagnostics like disk usage, memory, load, uptime, or ping checks, use the shell diagnostic tool.
 - Start with `fs_list_directory` or `fs_stat_path` when path structure is uncertain, then use `fs_read_file` / `fs_write_file` / others.
@@ -22,6 +23,50 @@ Rules:
 - After tool calls, summarize clearly what was done, which paths were used, and any HTTP/tool errors.
 - Do not claim an operation was performed unless you actually executed the appropriate tool.
 """
+
+
+def _user_requests_mcp_tool_catalog(text: str) -> bool:
+    """Heuristic: user wants the current MCP tool list (not a filesystem path listing)."""
+    t = text.casefold()
+    needles = (
+        "jakie narz",
+        "jakie tool",
+        "jakie toole",
+        "lista narzed",
+        "lista narzęd",
+        "lista tool",
+        "dostepne narzed",
+        "dostępne narzęd",
+        "ktore narzed",
+        "które narzęd",
+        "co za narzed",
+        "co za narzęd",
+        "pokaz narzed",
+        "pokaż narzęd",
+        "wylistuj narzed",
+        "wylistuj narzęd",
+        "what tools",
+        "which tools",
+        "list tools",
+        "tool list",
+        "available tools",
+        "mcp tools",
+        "narzedzia mcp",
+        "narzędzia mcp",
+        "manifest narzed",
+        "manifest narzęd",
+        "manifest tool",
+        "mcp_refresh_tool_manifest",
+    )
+    return any(n in t for n in needles)
+
+
+def _manifest_tool_in_schema_list(mcp_tools: list[dict[str, Any]]) -> bool:
+    for item in mcp_tools:
+        fn = item.get("function")
+        if isinstance(fn, dict) and fn.get("name") == "mcp_refresh_tool_manifest":
+            return True
+    return False
 
 
 def normalize_model_name(model: str) -> str:
@@ -81,7 +126,7 @@ def _chat_tool_loop(
     )
     model_id = normalize_model_name(model)
     messages: list[dict[str, Any]] = [
-        {"role": "system", "content": FS_AGENT_SYSTEM},
+        {"role": "system", "content": MCP_AGENT_SYSTEM},
         *prior_messages,
         {"role": "user", "content": user_input},
     ]
@@ -93,13 +138,21 @@ def _chat_tool_loop(
     if not mcp_tools:
         return "No MCP tools are available for this API key."
 
+    pending_force_manifest = (
+        _user_requests_mcp_tool_catalog(user_input) and _manifest_tool_in_schema_list(mcp_tools)
+    )
+
     for _ in range(max_rounds):
         try:
+            tool_choice: Any = "auto"
+            if pending_force_manifest:
+                tool_choice = {"type": "function", "function": {"name": "mcp_refresh_tool_manifest"}}
+                pending_force_manifest = False
             completion = client.chat.completions.create(
                 model=model_id,
                 messages=messages,
                 tools=mcp_tools,
-                tool_choice="auto",
+                tool_choice=tool_choice,
                 max_tokens=4096,
             )
         except Exception as exc:
