@@ -6,6 +6,9 @@ from dotenv import load_dotenv
 from .microsoft_runtime_settings import read_settings
 from .types import AgentConfig
 
+# Zawsze repo root (…/jarvis1net/.env), niezależnie od cwd (np. systemd WorkingDirectory=src).
+_DOTENV_PATH = Path(__file__).resolve().parents[2] / ".env"
+
 # Short delegated names only; MSAL injects openid/profile/offline_access. Do not pass those three here.
 _DEFAULT_MS_SCOPES = (
     "User.Read Mail.ReadWrite Mail.Send Calendars.ReadWrite Files.ReadWrite.All"
@@ -13,7 +16,7 @@ _DEFAULT_MS_SCOPES = (
 
 
 def load_config() -> AgentConfig:
-    load_dotenv()
+    load_dotenv(_DOTENV_PATH)
     telegram_allowed_raw = os.getenv("TELEGRAM_ALLOWED_CHAT_IDS", "").strip()
     telegram_allowed_ids = [x.strip() for x in telegram_allowed_raw.split(",") if x.strip()]
     telegram_timeout_raw = os.getenv("TELEGRAM_POLLING_TIMEOUT_SEC", "25").strip()

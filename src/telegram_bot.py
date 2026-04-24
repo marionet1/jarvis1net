@@ -90,7 +90,18 @@ def process_message(
             "Microsoft (Graph): /microsoft-set-client <Client-ID> [tenant], potem /microsoft-login. "
             "Konto osobiste (@outlook itd.): tenant **consumers** + w Azure redirect …/consumers/oauth2/nativeclient. "
             "Szybka zmiana tenantu: /microsoft-set-tenant consumers | organizations | common. "
-            "Token z PC: /microsoft-set-graph-token. Szczegóły: /microsoft-show-settings."
+            "Token z PC: /microsoft-set-graph-token. Szczegóły: /microsoft-show-settings.\n"
+            "Limit MCP (rundy narzędzi / obcięcie JSON): /jarvis-limits"
+        ]
+
+    if command_base in {"/jarvis-limits", "/mcp-limits", "/limits"}:
+        return [
+            "jarvis1net — limity MCP w tej instancji:\n"
+            f"- MCP_MAX_TOOL_ROUNDS (efektywnie): {config.mcp_max_tool_rounds}\n"
+            f"- MCP_TOOL_RESULT_MAX_CHARS: {config.mcp_tool_result_max_chars}\n"
+            f"- MCP_TIMEOUT_SEC: {config.mcp_timeout_sec}\n"
+            f"- Plik .env: {Path(__file__).resolve().parents[1] / '.env'}\n"
+            "Zmiana: edytuj .env w katalogu repo (nie src/) i zrestartuj bota."
         ]
 
     if command_base == "/microsoft-set-client":

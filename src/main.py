@@ -91,6 +91,13 @@ def main() -> None:
             print(f"Zapisano {len(scope_list)} scope(y).\n")
             continue
 
+        if cmd in {"/jarvis-limits", "/mcp-limits", "/limits"}:
+            print("jarvis1net — limity MCP:")
+            print(f"  MCP_MAX_TOOL_ROUNDS: {config.mcp_max_tool_rounds}")
+            print(f"  MCP_TOOL_RESULT_MAX_CHARS: {config.mcp_tool_result_max_chars}")
+            print(f"  MCP_TIMEOUT_SEC: {config.mcp_timeout_sec}\n")
+            continue
+
         if cmd in {"/microsoft-show-settings", "/microsoft-config"}:
             rt = read_settings(config.audit_log_path)
             cid_env = os.getenv("MICROSOFT_CLIENT_ID", "").strip()
