@@ -57,6 +57,7 @@ To request an API key, send a DM on GitHub: [github.com/marionet1](https://githu
 - **Microsoft Graph** (optional): MCP still has no Azure secrets; the agent sends `X-Graph-Authorization`.
   - **Device code (Telegram):** either set `MICROSOFT_CLIENT_ID` in `.env`, **or** send **`/microsoft-set-client <Azure-Client-ID> [tenant]`** in chat (saved to `microsoft_agent_settings.json` next to audit logs — no restart). Then **`/microsoft-login`** sends the link + code; tokens go to `MICROSOFT_TOKEN_CACHE_PATH` or next to the audit log. **`/microsoft-logout`** clears the token cache; **`/microsoft-clear-runtime`** removes chat-saved Client ID/scopes. **`/microsoft-show-settings`** summarizes effective config.
   - **Static token:** `MICROSOFT_GRAPH_ACCESS_TOKEN` overrides the cache if set (e.g. short tests).
+  - **Azure Portal (ważne):** dla device code nie używaj Web redirectu na `mcp.jarvis1.net/.../oauth/callback` (to stary model). W **Authentication** włącz **Allow public client flows**, dodaj platformę **Mobile and desktop applications** z redirectem `https://login.microsoftonline.com/common/oauth2/nativeclient`, usuń zbędny redirect Web na MCP — inaczej przeglądarka po logowaniu może trafić w ślepy zaułek z błędem `invalid_request`.
 
 ## Security Notes
 
