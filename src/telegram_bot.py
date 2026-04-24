@@ -9,6 +9,7 @@ import requests
 from core.agent import run_agent_turn
 from core.audit import write_audit_event
 from core.config import load_config
+from core.types import AgentConfig
 from core.llm import get_llm_reply
 from core.microsoft_auth import (
     clear_token_cache_file,
@@ -23,6 +24,33 @@ from core.microsoft_runtime_settings import (
     validate_client_id,
 )
 from core.session_context import get_session_store
+
+def run_telegram_startup_hooks(config: AgentConfig) -> None:
+    """Po restarcie procesu: opcjonalnie czyści session_paths i wysyła powitanie na dozwolone czaty."""
+    if not config.telegram_clear_session_on_start and not config.telegram_notify_on_start:
+        return
+    store = get_session_store(config.session_context_path)
+    if config.telegram_clear_session_on_start:
+        if config.telegram_allowed_chat_ids:
+            for cid in config.telegram_allowed_chat_ids:
+                store.clear_key(cid)
+        else:
+            store.clear_all_sessions()
+        store.save()
+    if not config.telegram_notify_on_start:
+        return
+    if not config.telegram_allowed_chat_ids:
+        print(
+            "jarvis1net: TELEGRAM_NOTIFY_ON_START jest włączone, ale TELEGRAM_ALLOWED_CHAT_IDS jest puste — "
+            "pomijam wysyłkę powitania (ustaw numeryczne ID czatu, oddzielone przecinkiem)."
+        )
+        return
+    for cid_s in config.telegram_allowed_chat_ids:
+        try:
+            send_message(config.telegram_bot_token, int(cid_s), config.telegram_startup_message)
+        except Exception as exc:
+            print(f"jarvis1net: powitanie startowe do chat_id={cid_s} nie powiodło się: {exc}")
+
 
 # Natural phrases that clear chat memory (without slash commands).
 _CLEAR_HISTORY_PHRASES = frozenset(
@@ -86,6 +114,8 @@ def process_message(
         return [
             "jarvis1net — chat naturally and ask for file operations, directory listings, MCP health checks, and more.\n"
             "The bot keeps short chat memory for this conversation. To clear it, send: 'clear history'.\n"
+            "Po restarcie procesu bota pamięć czatu może być automatycznie wyzerowana i dostaniesz krótką wiadomość "
+            "(domyślnie włączone — patrz TELEGRAM_NOTIFY_ON_START / TELEGRAM_CLEAR_SESSION_ON_START w .env).\n"
             "When MCP tools are used, you will first receive a short 'Using mcp-jarvis1net' message with tool name and arguments.\n"
             "Microsoft (Graph): /microsoft-set-client <Client-ID> [tenant], potem /microsoft-login. "
             "Konto osobiste (@outlook itd.): tenant **consumers** + w Azure redirect …/consumers/oauth2/nativeclient. "
@@ -296,6 +326,7 @@ def run_bot() -> None:
 
     offset = 0
     print("Telegram bot started (chat-only long polling).")
+    run_telegram_startup_hooks(config)
 
     while True:
         try:

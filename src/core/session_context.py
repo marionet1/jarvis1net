@@ -141,6 +141,11 @@ class SessionStore:
         with self._lock:
             self._by_key.pop(session_key, None)
 
+    def clear_all_sessions(self) -> None:
+        """Usuwa wszystkie sesje z pamięci (plik zostanie nadpisany przy następnym save)."""
+        with self._lock:
+            self._by_key.clear()
+
 
 _store: SessionStore | None = None
 _store_resolved: str | None = None

@@ -14,11 +14,29 @@ _DEFAULT_MS_SCOPES = (
     "User.Read Mail.ReadWrite Mail.Send Calendars.ReadWrite Files.ReadWrite.All"
 )
 
+_DEFAULT_TELEGRAM_STARTUP_MESSAGE = (
+    "Hej — jarvis1net wystartował po restarcie. "
+    "Pamięć rozmowy w tym czacie została wyzerowana; możemy gadać od zera."
+)
+
+
+def _env_bool(key: str, default: bool) -> bool:
+    v = os.getenv(key, "").strip().lower()
+    if v == "":
+        return default
+    return v in ("1", "true", "yes", "on", "tak")
+
 
 def load_config() -> AgentConfig:
     load_dotenv(_DOTENV_PATH)
     telegram_allowed_raw = os.getenv("TELEGRAM_ALLOWED_CHAT_IDS", "").strip()
     telegram_allowed_ids = [x.strip() for x in telegram_allowed_raw.split(",") if x.strip()]
+    telegram_notify_on_start = _env_bool("TELEGRAM_NOTIFY_ON_START", True)
+    telegram_clear_session_on_start = _env_bool("TELEGRAM_CLEAR_SESSION_ON_START", True)
+    telegram_startup_msg_raw = os.getenv("TELEGRAM_STARTUP_MESSAGE", "").strip()
+    telegram_startup_message = (
+        telegram_startup_msg_raw if telegram_startup_msg_raw else _DEFAULT_TELEGRAM_STARTUP_MESSAGE
+    )
     telegram_timeout_raw = os.getenv("TELEGRAM_POLLING_TIMEOUT_SEC", "25").strip()
     try:
         telegram_polling_timeout = max(5, int(telegram_timeout_raw))
@@ -103,6 +121,9 @@ def load_config() -> AgentConfig:
         openrouter_api_key=os.getenv("OPENROUTER_API_KEY", ""),
         telegram_bot_token=os.getenv("TELEGRAM_BOT_TOKEN", "").strip(),
         telegram_allowed_chat_ids=telegram_allowed_ids,
+        telegram_notify_on_start=telegram_notify_on_start,
+        telegram_clear_session_on_start=telegram_clear_session_on_start,
+        telegram_startup_message=telegram_startup_message,
         telegram_polling_timeout_sec=telegram_polling_timeout,
         audit_log_path=audit_log_path,
         mcp_server_url=os.getenv("MCP_SERVER_URL", "https://mcp.jarvis1.net").strip().rstrip("/"),
