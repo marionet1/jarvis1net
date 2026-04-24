@@ -3,7 +3,10 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from .microsoft_runtime_settings import read_settings
 from .types import AgentConfig
+
+_DEFAULT_MS_SCOPES = "offline_access User.Read Mail.Read Calendars.Read Files.Read.All"
 
 
 def load_config() -> AgentConfig:
@@ -34,13 +37,27 @@ def load_config() -> AgentConfig:
         session_context_path = str(Path(audit_log_path).expanduser().resolve().parent / "session_paths.json")
 
     graph_token = os.getenv("MICROSOFT_GRAPH_ACCESS_TOKEN", "").strip()
-    ms_client = os.getenv("MICROSOFT_CLIENT_ID", "").strip()
-    ms_tenant = os.getenv("MICROSOFT_TENANT_ID", "common").strip() or "common"
-    scopes_raw = os.getenv(
-        "MICROSOFT_GRAPH_SCOPES",
-        "offline_access User.Read Mail.Read Calendars.Read Files.Read.All",
-    ).strip()
-    ms_scopes = [s.strip() for s in scopes_raw.replace(",", " ").split() if s.strip()]
+    rt = read_settings(audit_log_path)
+
+    ms_client = os.getenv("MICROSOFT_CLIENT_ID", "").strip() or str(rt.get("client_id") or "").strip()
+
+    ms_tenant_env = os.getenv("MICROSOFT_TENANT_ID", "").strip()
+    if ms_tenant_env:
+        ms_tenant = ms_tenant_env
+    else:
+        ms_tenant = str(rt.get("tenant_id") or "common").strip() or "common"
+
+    scopes_env = os.getenv("MICROSOFT_GRAPH_SCOPES", "").strip()
+    if scopes_env:
+        ms_scopes = [s.strip() for s in scopes_env.replace(",", " ").split() if s.strip()]
+    else:
+        gs = rt.get("graph_scopes")
+        if isinstance(gs, list) and gs:
+            ms_scopes = [str(x).strip() for x in gs if str(x).strip()]
+        elif isinstance(gs, str) and gs.strip():
+            ms_scopes = [s.strip() for s in gs.replace(",", " ").split() if s.strip()]
+        else:
+            ms_scopes = [s.strip() for s in _DEFAULT_MS_SCOPES.split() if s.strip()]
     ms_cache_env = os.getenv("MICROSOFT_TOKEN_CACHE_PATH", "").strip()
     if ms_cache_env:
         ms_cache = ms_cache_env

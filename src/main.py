@@ -1,8 +1,18 @@
+import os
+from pathlib import Path
+
 from core.agent import run_agent_turn
 from core.audit import write_audit_event
 from core.config import load_config
 from core.llm import get_llm_reply
 from core.microsoft_auth import clear_token_cache_file, run_device_code_login
+from core.microsoft_runtime_settings import (
+    clear_settings_file,
+    read_settings,
+    save_merged_settings,
+    settings_path,
+    validate_client_id,
+)
 from core.session_context import get_session_store
 
 _CLEAR_HISTORY_PHRASES = frozenset(
@@ -16,7 +26,6 @@ _CLEAR_HISTORY_PHRASES = frozenset(
 
 
 def main() -> None:
-    config = load_config()
     print("jarvis1net v0.1 — type naturally. Use /exit to quit. Type 'clear history' to reset chat memory.")
     print()
 
@@ -32,11 +41,59 @@ def main() -> None:
         if line.lower() == "/exit":
             break
 
+        config = load_config()
         low = line.lower()
         cmd = low.split()[0] if low else ""
+        stripped = line.strip()
+
+        if cmd == "/microsoft-set-client":
+            parts = stripped.split()
+            if len(parts) < 2:
+                print("Użycie: /microsoft-set-client <Client-ID> [tenant]\n")
+                continue
+            cid = parts[1].strip()
+            tenant = parts[2].strip() if len(parts) > 2 else "common"
+            if not validate_client_id(cid):
+                print("Client ID musi być pełnym UUID z Azure.\n")
+                continue
+            save_merged_settings(config.audit_log_path, {"client_id": cid, "tenant_id": tenant})
+            print(f"Zapisano (tenant: {tenant}). Teraz /microsoft-login\n")
+            continue
+
+        if cmd in {"/microsoft-set-scopes", "/microsoft-scopes"}:
+            parts = stripped.split(None, 1)
+            if len(parts) < 2 or not parts[1].strip():
+                print(" ".join(config.microsoft_graph_scopes))
+                print("Użycie: /microsoft-set-scopes offline_access User.Read …\n")
+                continue
+            scope_list = [s.strip() for s in parts[1].replace(",", " ").split() if s.strip()]
+            if not scope_list:
+                print("Podaj scope.\n")
+                continue
+            save_merged_settings(config.audit_log_path, {"graph_scopes": scope_list})
+            print(f"Zapisano {len(scope_list)} scope(y).\n")
+            continue
+
+        if cmd in {"/microsoft-show-settings", "/microsoft-config"}:
+            rt = read_settings(config.audit_log_path)
+            cid_env = os.getenv("MICROSOFT_CLIENT_ID", "").strip()
+            src = "env" if cid_env else ("plik" if rt.get("client_id") else "brak")
+            has_cache = Path(config.microsoft_token_cache_path).expanduser().exists()
+            print(f"Client ID: {config.microsoft_client_id or '(brak)'} (źródło: {src})")
+            print(f"Tenant: {config.microsoft_tenant_id}")
+            print(f"Scopes: {' '.join(config.microsoft_graph_scopes)}")
+            print(f"Ustawienia: {settings_path(config.audit_log_path)}")
+            print(f"Cache tokenów: {'tak' if has_cache else 'nie'}\n")
+            continue
+
+        if cmd in {"/microsoft-clear-runtime", "/microsoft-clear-settings"}:
+            print(clear_settings_file(config.audit_log_path))
+            print()
+            continue
+
         if cmd in {"/microsoft-login", "/msft-login"}:
             if not config.microsoft_client_id.strip():
-                print("Ustaw MICROSOFT_CLIENT_ID w .env (Azure public client).\n")
+                print("Brak Client ID — użyj /microsoft-set-client <UUID> lub .env\n")
                 continue
             try:
 

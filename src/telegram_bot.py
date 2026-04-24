@@ -1,5 +1,7 @@
+import os
 import threading
 import time
+from pathlib import Path
 from typing import Any, Callable
 
 import requests
@@ -9,6 +11,13 @@ from core.audit import write_audit_event
 from core.config import load_config
 from core.llm import get_llm_reply
 from core.microsoft_auth import clear_token_cache_file, run_device_code_login
+from core.microsoft_runtime_settings import (
+    clear_settings_file,
+    read_settings,
+    save_merged_settings,
+    settings_path,
+    validate_client_id,
+)
 from core.session_context import get_session_store
 
 # Natural phrases that clear chat memory (without slash commands).
@@ -74,15 +83,71 @@ def process_message(
             "jarvis1net — chat naturally and ask for file operations, directory listings, MCP health checks, and more.\n"
             "The bot keeps short chat memory for this conversation. To clear it, send: 'clear history'.\n"
             "When MCP tools are used, you will first receive a short 'Using mcp-jarvis1net' message with tool name and arguments.\n"
-            "Microsoft (Graph / skrzynka): ustaw MICROSOFT_CLIENT_ID w .env, potem wyślij /microsoft-login — bot poda link i kod do wpisania w przeglądarce."
+            "Microsoft (Graph): wpisz w czacie /microsoft-set-client <Client-ID z Azure> [tenant], potem /microsoft-login (link + kod). "
+            "Alternatywa: MICROSOFT_CLIENT_ID w .env. Szczegóły: /microsoft-show-settings."
         ]
+
+    if command_base == "/microsoft-set-client":
+        parts = stripped.split()
+        if len(parts) < 2:
+            return [
+                "Użycie: /microsoft-set-client <Application-Client-ID> [tenant]\n"
+                "tenant: np. common, organizations lub GUID katalogu (domyślnie common).\n"
+                "W Azure: rejestracja aplikacji → public client + device code + Allow public client flows."
+            ]
+        cid = parts[1].strip()
+        tenant = parts[2].strip() if len(parts) > 2 else "common"
+        if not validate_client_id(cid):
+            return ["Client ID musi być pełnym UUID (format 8-4-4-4-12 z Azure Portal)."]
+        save_merged_settings(config.audit_log_path, {"client_id": cid, "tenant_id": tenant})
+        return [
+            f"Zapisano Client ID (tenant: {tenant}). Następnie wyślij /microsoft-login — bez restartu bota."
+        ]
+
+    if command_base in {"/microsoft-set-scopes", "/microsoft-scopes"}:
+        parts = stripped.split(None, 1)
+        if len(parts) < 2 or not parts[1].strip():
+            scopes_txt = " ".join(config.microsoft_graph_scopes)
+            return [
+                "Użycie: /microsoft-set-scopes offline_access User.Read Mail.Read …\n"
+                f"Aktualnie (efektywnie): {scopes_txt}"
+            ]
+        raw_scopes = parts[1].strip()
+        scope_list = [s.strip() for s in raw_scopes.replace(",", " ").split() if s.strip()]
+        if not scope_list:
+            return ["Podaj co najmniej jeden scope."]
+        save_merged_settings(config.audit_log_path, {"graph_scopes": scope_list})
+        return [
+            f"Zapisano {len(scope_list)} scope(y). Zgodne delegated permissions muszą być w Azure. Potem /microsoft-login."
+        ]
+
+    if command_base in {"/microsoft-show-settings", "/microsoft-config"}:
+        rt = read_settings(config.audit_log_path)
+        cid_env = os.getenv("MICROSOFT_CLIENT_ID", "").strip()
+        src = "MICROSOFT_CLIENT_ID w .env" if cid_env else ("microsoft_agent_settings.json (czat/CLI)" if rt.get("client_id") else "brak")
+        has_cache = Path(config.microsoft_token_cache_path).expanduser().exists()
+        cid_show = config.microsoft_client_id or "(brak)"
+        lines = [
+            "Microsoft — konfiguracja agenta:",
+            f"- Client ID: {cid_show}",
+            f"- Źródło Client ID: {src}",
+            f"- Tenant: {config.microsoft_tenant_id}",
+            f"- Scope: {' '.join(config.microsoft_graph_scopes)}",
+            f"- Plik ustawień: {settings_path(config.audit_log_path)}",
+            f"- Cache tokenów MSAL: {'tak' if has_cache else 'nie'}",
+            "Komendy: /microsoft-set-client …, /microsoft-set-scopes …, /microsoft-login, /microsoft-logout, /microsoft-clear-runtime",
+        ]
+        return ["\n".join(lines)]
+
+    if command_base in {"/microsoft-clear-runtime", "/microsoft-clear-settings"}:
+        return [clear_settings_file(config.audit_log_path)]
 
     if command_base in {"/microsoft-login", "/msft-login"}:
         cfg = load_config()
         if not cfg.microsoft_client_id.strip():
             return [
-                "Brak MICROSOFT_CLIENT_ID w .env agenta. Dodaj Application (client) ID z Azure Portal "
-                "(typ: public client / device code) i zrestartuj bota."
+                "Brak Client ID. W czacie wyślij: /microsoft-set-client <UUID z Azure> [tenant]\n"
+                "albo ustaw MICROSOFT_CLIENT_ID w .env i zrestartuj bota."
             ]
 
         bot_token = cfg.telegram_bot_token

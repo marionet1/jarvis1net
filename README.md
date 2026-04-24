@@ -55,7 +55,7 @@ To request an API key, send a DM on GitHub: [github.com/marionet1](https://githu
 - `AUDIT_LOG_PATH`, `SESSION_CONTEXT_PATH` (optional)
 - `MCP_SERVER_URL`, `MCP_API_KEY`, `MCP_TIMEOUT_SEC`, `MCP_MAX_TOOL_ROUNDS`
 - **Microsoft Graph** (optional): MCP still has no Azure secrets; the agent sends `X-Graph-Authorization`.
-  - **Device code (Telegram):** set `MICROSOFT_CLIENT_ID` (Azure app registration as a **public client**, enable **Allow public client flows**), delegated API permissions matching `MICROSOFT_GRAPH_SCOPES`, then send **`/microsoft-login`** to the bot — you get a link + code, tokens are saved to `MICROSOFT_TOKEN_CACHE_PATH` or next to the audit log. **`/microsoft-logout`** deletes that cache file.
+  - **Device code (Telegram):** either set `MICROSOFT_CLIENT_ID` in `.env`, **or** send **`/microsoft-set-client <Azure-Client-ID> [tenant]`** in chat (saved to `microsoft_agent_settings.json` next to audit logs — no restart). Then **`/microsoft-login`** sends the link + code; tokens go to `MICROSOFT_TOKEN_CACHE_PATH` or next to the audit log. **`/microsoft-logout`** clears the token cache; **`/microsoft-clear-runtime`** removes chat-saved Client ID/scopes. **`/microsoft-show-settings`** summarizes effective config.
   - **Static token:** `MICROSOFT_GRAPH_ACCESS_TOKEN` overrides the cache if set (e.g. short tests).
 
 ## Security Notes

@@ -11,3 +11,4 @@ __pycache__/
 Thumbs.db
 logs/
 ms_graph_token_cache.json
+microsoft_agent_settings.json
