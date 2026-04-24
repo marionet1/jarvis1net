@@ -8,7 +8,7 @@ from urllib.parse import parse_qsl, unquote
 from openai import OpenAI
 
 from .mcp_tools import filter_mcp_tools_when_graph_token_present, load_mcp_tools, run_mcp_tool
-from .openrouter_pricing import format_openrouter_cost_line
+from .openrouter_pricing import build_compact_token_usage_footer
 from .session_context import get_session_store
 from .types import AgentConfig
 
@@ -141,24 +141,24 @@ def _usage_footer_cumulative(
 ) -> str:
     if rounds <= 0:
         return ""
-    total = prompt + completion
     if prompt == 0 and completion == 0:
-        base = "\n\n— Tokeny: brak pola usage w odpowiedziach API (OpenRouter czasem nie zwraca usage)."
-    else:
-        base = (
-            f"\n\n— Tokeny (łącznie w tej odpowiedzi, suma z {rounds} wywołań modelu): "
-            f"prompt≈{prompt}, completion≈{completion}, razem≈{total}."
+        return (
+            "\n\n- Tokeny: brak pola usage w odpowiedziach API (OpenRouter czasem nie zwraca usage)."
+            + (
+                " Osiągnięto MCP_MAX_TOOL_ROUNDS — ustaw wyższą wartość w .env (np. 24) lub podziel zadanie."
+                if limit_hit
+                else ""
+            )
         )
-    if limit_hit:
-        base += " Osiągnięto MCP_MAX_TOOL_ROUNDS — ustaw wyższą wartość w .env (np. 24) lub podziel zadanie."
-    if config.openrouter_show_cost_estimate and (prompt > 0 or completion > 0):
-        base += format_openrouter_cost_line(
-            api_key=config.openrouter_api_key,
-            model_id=model_id,
-            prompt_tokens=prompt,
-            completion_tokens=completion,
-        )
-    return base
+    return build_compact_token_usage_footer(
+        api_key=config.openrouter_api_key,
+        model_id=model_id,
+        prompt_tokens=prompt,
+        completion_tokens=completion,
+        model_rounds=rounds,
+        show_cost_estimate=config.openrouter_show_cost_estimate,
+        limit_hit=limit_hit,
+    )
 
 
 def _usage_footer_from_responses_api(response: Any, *, model_id: str, config: AgentConfig) -> str:
@@ -177,15 +177,15 @@ def _usage_footer_from_responses_api(response: Any, *, model_id: str, config: Ag
     total = int(tt) if tt is not None else pt + ct
     if pt == 0 and ct == 0 and total == 0:
         return ""
-    base = f"\n\n— Tokeny (ta odpowiedź, API): wejście≈{pt}, wyjście≈{ct}, suma≈{total}."
-    if config.openrouter_show_cost_estimate:
-        base += format_openrouter_cost_line(
-            api_key=config.openrouter_api_key,
-            model_id=model_id,
-            prompt_tokens=pt,
-            completion_tokens=ct,
-        )
-    return base
+    return build_compact_token_usage_footer(
+        api_key=config.openrouter_api_key,
+        model_id=model_id,
+        prompt_tokens=pt,
+        completion_tokens=ct,
+        model_rounds=1,
+        show_cost_estimate=config.openrouter_show_cost_estimate,
+        limit_hit=False,
+    )
 
 
 _MAX_GRAPH_VALUE_ITEMS = 22

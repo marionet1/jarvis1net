@@ -56,42 +56,62 @@ def _to_float(x: Any) -> float | None:
         return None
 
 
-def format_openrouter_cost_line(
+def estimate_openrouter_usd(api_key: str, model_id: str, prompt_tokens: int, completion_tokens: int) -> float | None:
+    """USD z pól `pricing.prompt` / `pricing.completion` (USD za 1 token). None = brak danych / błąd."""
+    if prompt_tokens <= 0 and completion_tokens <= 0:
+        return None
+    try:
+        models = _fetch_models_list(api_key)
+        pr = _pricing_for_model(models, model_id)
+        if not pr:
+            return None
+        pu = _to_float(pr.get("prompt"))
+        cu = _to_float(pr.get("completion"))
+        if pu is None and cu is None:
+            return None
+        return prompt_tokens * (pu or 0.0) + completion_tokens * (cu or 0.0)
+    except Exception:
+        return None
+
+
+def _format_usd_compact(usd: float) -> str:
+    if usd <= 0:
+        return "$0"
+    if usd < 0.01:
+        return f"${usd:.4f}"
+    if usd < 1:
+        return f"${usd:.3f}"
+    return f"${usd:.2f}"
+
+
+def build_compact_token_usage_footer(
     *,
     api_key: str,
     model_id: str,
     prompt_tokens: int,
     completion_tokens: int,
+    model_rounds: int,
+    show_cost_estimate: bool,
+    limit_hit: bool = False,
 ) -> str:
     """
-    Zwraca jedną linię markdown z ~kosztem USD.
-
-    W polu `pricing` OpenRouter podaje **USD za 1 token** (np. 1.5e-7 = 0.15 USD / 1M prompt).
+    Jedna zwięzła linia: ``Tokens: prompt+completion=total est ~$...`` (+ opcjonalnie rundy / limit).
     """
     if prompt_tokens <= 0 and completion_tokens <= 0:
-        return ""
-    try:
-        models = _fetch_models_list(api_key)
-    except Exception as exc:
         return (
-            f"\n- **Koszt (~)**: nie udało się pobrać `GET /api/v1/models` ({type(exc).__name__}: "
-            f"{str(exc)[:180]})."
+            "\n\n- Tokeny: brak pola usage w odpowiedziach API (OpenRouter czasem nie zwraca usage)."
         )
-    pr = _pricing_for_model(models, model_id)
-    if pr is None:
-        return f"\n- **Koszt (~)**: brak modelu `{model_id}` w liście OpenRouter (sprawdź `MODEL` vs id na openrouter.ai)."
-    pu = _to_float(pr.get("prompt"))
-    cu = _to_float(pr.get("completion"))
-    if pu is None and cu is None:
-        return f"\n- **Koszt (~)**: dla `{model_id}` brak pól `pricing.prompt` / `pricing.completion`."
-    pu_f = pu or 0.0
-    cu_f = cu or 0.0
-    usd = prompt_tokens * pu_f + completion_tokens * cu_f
-    per_m_in = pu_f * 1_000_000
-    per_m_out = cu_f * 1_000_000
-    return (
-        f"\n- **Koszt orientacyjny**: ~**${usd:.4f}** USD "
-        f"({prompt_tokens} prompt + {completion_tokens} completion, stawki z cennika OpenRouter dla **`{model_id}`** "
-        f"~ **${per_m_in:.2f}** / 1M prompt, **${per_m_out:.2f}** / 1M completion). "
-        "Faktyczne obciążenie konta może się różnić (promocje, cache, opłaty OpenRouter, zaokrąglenia)."
-    )
+    total = prompt_tokens + completion_tokens
+    parts = [f"Tokens: {prompt_tokens}+{completion_tokens}={total}"]
+    if model_rounds > 1:
+        parts.append(f"{model_rounds} calls")
+    line = "\n\n- " + ", ".join(parts)
+    if show_cost_estimate:
+        usd = estimate_openrouter_usd(api_key, model_id, prompt_tokens, completion_tokens)
+        if usd is not None:
+            line += f" est {_format_usd_compact(usd)}"
+        else:
+            line += " est n/a"
+    if limit_hit:
+        line += " | MCP_MAX_TOOL_ROUNDS"
+    return line
