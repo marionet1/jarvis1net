@@ -5,17 +5,18 @@ from typing import Any, Callable
 
 from openai import OpenAI
 
-from .mcp_fs_tools import FILESYSTEM_TOOLS, run_filesystem_tool
+from .mcp_tools import load_mcp_tools, run_mcp_tool
 from .session_context import get_session_store
 from .types import AgentConfig
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
-FS_AGENT_SYSTEM = """You are the jarvis1net assistant with access to fs_* tools. These tools operate on **files and directories on the server** (MCP), only within allowed paths configured by the operator.
+FS_AGENT_SYSTEM = """You are the jarvis1net assistant with tools provided by MCP server manifest.
 
 Rules:
 - Use previous turns from this session as conversation context.
 - When the user asks for server-side file operations (list/read/write/create/delete/rename), **use tools** instead of guessing filesystem content.
+- For diagnostics like disk usage, memory, load, uptime, or ping checks, use the shell diagnostic tool.
 - Start with `fs_list_directory` or `fs_stat_path` when path structure is uncertain, then use `fs_read_file` / `fs_write_file` / others.
 - Use `create_parents: true` when writing into a directory tree that may not exist yet.
 - After tool calls, summarize clearly what was done, which paths were used, and any HTTP/tool errors.
@@ -85,13 +86,19 @@ def _chat_tool_loop(
         {"role": "user", "content": user_input},
     ]
     max_rounds = config.mcp_max_tool_rounds
+    try:
+        mcp_tools = load_mcp_tools(config)
+    except Exception as exc:
+        return f"MCP tools manifest error: {exc}"
+    if not mcp_tools:
+        return "No MCP tools are available for this API key."
 
     for _ in range(max_rounds):
         try:
             completion = client.chat.completions.create(
                 model=model_id,
                 messages=messages,
-                tools=FILESYSTEM_TOOLS,
+                tools=mcp_tools,
                 tool_choice="auto",
                 max_tokens=4096,
             )
@@ -126,7 +133,7 @@ def _chat_tool_loop(
                     args = json.loads(tc.function.arguments or "{}")
                 except json.JSONDecodeError:
                     args = {}
-                result = run_filesystem_tool(tc.function.name, args, config)
+                result = run_mcp_tool(tc.function.name, args, config)
                 messages.append({"role": "tool", "tool_call_id": tc.id, "content": result})
             continue
 
