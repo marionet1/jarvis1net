@@ -27,9 +27,9 @@ Rules:
 - For mail/calendar/OneDrive **create, update, delete, send**, prefer **`microsoft_graph_api`** with the correct Graph `path` and `method` (see Microsoft Graph REST docs); helper tools only cover simple reads/lists.
 - To **mark many messages read**, after a GET with `value` of unread messages call **`microsoft_mail_mark_read`** with **all** `value[].id` strings in one `message_ids` array (repeat for next pages). Do **not** answer “all marked” after a single `PATCH` unless `value` had exactly one item or you used `microsoft_mail_mark_read` covering every id.
 - For **bulk** Graph reads (many folders/messages), use small ``$top`` (e.g. 25–50), ``$select`` with only needed fields, and iterate in steps — each tool JSON is **truncated** if too large, so prefer narrow queries over one giant response.
-- **Mailbox bulk work (step-by-step in one reply):** do **not** use deep ``$expand=childFolders`` on large trees in the same round as listing all message bodies. Prefer ``GET /me/mailFolders/inbox/childFolders?$select=id,displayName,unreadItemCount`` **without** expand. Then **one folder at a time**: for the next folder id with ``unreadItemCount>0``, ``GET .../mailFolders/{id}/messages?$filter=isRead eq false&$select=id&$top=15``, then ``microsoft_mail_mark_read`` with those ids (and ``mail_folder_id`` if PATCH is flaky). Repeat GET+mark for the next folder — **few tool calls per model round** (e.g. 1–2) so context stays small.
+- **Mailbox bulk work (step-by-step in one reply):** do **not** use deep ``$expand=childFolders`` on large trees in the same round as listing all message bodies. Prefer ``GET /me/mailFolders/inbox/childFolders?$select=id,displayName,unreadItemCount`` **without** expand. For **„oznacz wszystkie nieprzeczytane w tym folderze”** use **`microsoft_mail_mark_folder_read`** with that folder’s `mail_folder_id` (server follows **@odata.nextLink** — **never** use ``$skip`` on message lists; Graph ignores or mishandles it). For several folders with unread counts, call **`microsoft_mail_mark_folder_read` once per folder id** (few tool calls per round).
 - **Never** issue the same tool with the **same arguments** twice in one turn: if a result was truncated, narrow ``$select``/``$top`` or query the **next** folder id from an earlier response instead of repeating the identical GET.
-- **Mark many messages read/unread (or bulk PATCH on messages):** use ``$select=id`` only and ``$top`` at most **20** (not 50) per GET. After each GET, PATCH **every** returned id in follow-up tool calls **before** fetching the next page (``$skip`` or ``@odata.nextLink``). One huge GET can be truncated and you lose ids — then you cannot finish the job in one reply.
+- **Mark many messages read/unread (or bulk PATCH on messages):** use ``$select=id`` only and ``$top`` at most **20** per GET when you list ids manually; follow **``@odata.nextLink``** only (no ``$skip`` on ``/messages``). Prefer **`microsoft_mail_mark_folder_read`** over hand-paged GETs so no id is missed. One huge GET can be truncated and you lose ids — then you cannot finish the job in one reply.
 - **Mark one message read in Graph:** ``PATCH`` path ``/me/messages/{id}`` or ``/me/mailFolders/{folderId}/messages/{id}`` with JSON body exactly ``{"isRead": true}`` (boolean, key name ``isRead``). Success from the tool is usually ``{"ok": true, "status_code": 204}``. If the user says Outlook still shows unread, you may ``GET`` the same ``/me/messages/{id}?$select=isRead`` and report that JSON; do not claim success without that PATCH result in the tool output.
 """
 
@@ -367,8 +367,8 @@ def _chat_tool_loop(
                             raw = prev[0]
                             dup_note = (
                                 "\n\n[_jarvis1net: ponowny GET nieprzeczytanych w tym samym folderze i filtrze "
-                                "(np. inne $top) — to ta sama lista. Zrób PATCH {\"isRead\": true} na każde id z value "
-                                "poprzedniej odpowiedzi, dopiero potem ewentualnie $skip / @odata.nextLink.]"
+                                "(np. inne $top) — to ta sama lista. Użyj microsoft_mail_mark_read na każde id z value "
+                                "albo microsoft_mail_mark_folder_read(mail_folder_id). Następna strona: tylko @odata.nextLink, nie $skip.]"
                             )
                         else:
                             raw = run_mcp_tool(name, args, config)
@@ -388,14 +388,16 @@ def _chat_tool_loop(
                 if dup_note:
                     clipped = clipped + dup_note
                 messages.append({"role": "tool", "tool_call_id": tc.id, "content": clipped})
-                if name == "microsoft_mail_mark_read" or (
+                if name in ("microsoft_mail_mark_read", "microsoft_mail_mark_folder_read") or (
                     name == "microsoft_graph_api"
                     and _graph_patch_to_message(str(args.get("path", "")), str(args.get("method", "")))
                 ):
                     graph_read_generation += 1
                     graph_unread_soft_cache.clear()
                     for k in list(tool_result_cache.keys()):
-                        if k.startswith("microsoft_graph_api\0") or k.startswith("microsoft_mail_mark_read\0"):
+                        if k.startswith("microsoft_graph_api\0") or k.startswith(
+                            "microsoft_mail_mark_read\0"
+                        ) or k.startswith("microsoft_mail_mark_folder_read\0"):
                             tool_result_cache.pop(k, None)
             continue
 
