@@ -69,7 +69,39 @@ If running this repository outside the Docker stack, make sure `config/runtime_c
 - `/jarvis-limits`
 - `/microsoft-*`
 
-For production, set `telegram_allowed_chat_ids` in `config/runtime_config.json`.
+For production, set `allowed_chat_ids` in `config/telegram_config.json`.
+
+## Telegram bot setup (step by step)
+
+1. Create the bot in Telegram:
+   - Open [@BotFather](https://t.me/BotFather).
+   - Run `/newbot`.
+   - Set bot name and unique username (must end with `bot`).
+   - Copy the token from BotFather and put it in `.env` as `TELEGRAM_BOT_TOKEN`.
+
+2. Get your `chat_id` (who can talk to the bot):
+   - Send any message to your bot.
+   - Open in browser:
+     - `https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/getUpdates`
+   - Find `message.chat.id` in JSON response.
+
+3. Restrict access in `config/telegram_config.json`:
+
+```json
+{
+  "allowed_chat_ids": ["123456789", "-1001234567890"]
+}
+```
+
+- Positive ID = private chat user.
+- Negative ID (usually starts with `-100`) = group/supergroup.
+- Empty array means no access restriction.
+
+4. Restart the stack:
+
+```bash
+docker compose up -d --build
+```
 
 ## Configuration
 
@@ -79,10 +111,13 @@ For production, set `telegram_allowed_chat_ids` in `config/runtime_config.json`.
   - optional `MCP_GRAPH_ACCESS_TOKEN`
 - Non-secret runtime settings in `config/runtime_config.json`:
   - model, Telegram behavior, MCP stdio command/args, timeouts, paths, Microsoft tenant/scopes, timezone.
+- Telegram access control in `config/telegram_config.json`:
+  - `allowed_chat_ids` (array of chat IDs allowed to use the bot; empty = no restriction).
 
 ## Project layout
 
-- `config/runtime_config.json` - single place for non-secret runtime config
+- `config/runtime_config.json` - main non-secret runtime config
+- `config/telegram_config.json` - Telegram allowlist config (`allowed_chat_ids`)
 - `src/core/` - agent runtime (LLM loop, typed config model, session/audit)
 - `src/core/runtime_config.py` - runtime config loader + startup checks/reset helpers
 - `src/integrations/mcp/` - MCP stdio client + tool bridge integration

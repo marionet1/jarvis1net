@@ -1,7 +1,6 @@
 {
   "model": "o4-mini",
   "openrouter_show_cost_estimate": true,
-  "telegram_allowed_chat_ids": [],
   "telegram_notify_on_start": true,
   "telegram_clear_session_on_start": true,
   "telegram_startup_message": "Hi - jarvis1net restarted. Conversation memory in this chat was cleared; we can continue from a fresh context.",

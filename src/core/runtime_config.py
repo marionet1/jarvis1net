@@ -20,6 +20,7 @@ from .types import AgentConfig
 
 _DOTENV_PATH = Path(__file__).resolve().parents[2] / ".env"
 _RUNTIME_CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "runtime_config.json"
+_TELEGRAM_CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "telegram_config.json"
 
 _DEFAULT_MS_SCOPES = "User.Read Mail.ReadWrite Mail.Send Calendars.ReadWrite Files.ReadWrite.All"
 _DEFAULT_TELEGRAM_STARTUP_MESSAGE = (
@@ -62,12 +63,25 @@ def _load_runtime_config() -> dict[str, object]:
     return {}
 
 
+def _load_telegram_config() -> dict[str, object]:
+    try:
+        raw = json.loads(_TELEGRAM_CONFIG_PATH.read_text(encoding="utf-8"))
+        if isinstance(raw, dict):
+            return raw
+    except Exception:
+        pass
+    return {}
+
+
 def load_config() -> AgentConfig:
     load_dotenv(_DOTENV_PATH)
     cfg = _load_runtime_config()
+    tcfg = _load_telegram_config()
 
-    allowed_raw = cfg.get("telegram_allowed_chat_ids", [])
-    telegram_allowed_ids = [str(x).strip() for x in allowed_raw if str(x).strip()] if isinstance(allowed_raw, list) else []
+    allowed_raw = tcfg.get("allowed_chat_ids", [])
+    telegram_allowed_ids = (
+        [str(x).strip() for x in allowed_raw if str(x).strip()] if isinstance(allowed_raw, list) else []
+    )
     telegram_notify_on_start = _as_bool(cfg.get("telegram_notify_on_start", True), True)
     telegram_clear_session_on_start = _as_bool(cfg.get("telegram_clear_session_on_start", True), True)
     telegram_startup_raw = str(cfg.get("telegram_startup_message", "")).strip()
@@ -233,7 +247,8 @@ def run_startup_checks(config: AgentConfig) -> StartupCheckResult:
 
     if not config.telegram_allowed_chat_ids:
         warnings.append(
-            "telegram_allowed_chat_ids empty — anyone with the bot link can chat; production: set chat_id list in config/runtime_config.json."
+            "telegram allowed_chat_ids empty — anyone with the bot link can chat; production: set chat_id list in "
+            "config/telegram_config.json."
         )
 
     return StartupCheckResult(
