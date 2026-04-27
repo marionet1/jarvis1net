@@ -94,9 +94,6 @@ def build_compact_token_usage_footer(
     show_cost_estimate: bool,
     limit_hit: bool = False,
 ) -> str:
-    """
-    One compact line: ``Tokens: prompt+completion=total est ~$...`` (+ optional rounds / limit).
-    """
     if prompt_tokens <= 0 and completion_tokens <= 0:
         return (
             "\n\n- Tokens: no usage field in API responses (OpenRouter sometimes omits usage)."

@@ -27,3 +27,4 @@ class AgentConfig:
     microsoft_graph_scopes: list[str]
     microsoft_token_cache_path: str
     display_timezone: str
+    jarvis_no_docker_exit_restart: bool

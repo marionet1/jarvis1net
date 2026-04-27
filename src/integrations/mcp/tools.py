@@ -5,9 +5,10 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from .microsoft_agent import resolve_graph_access_token
-from .mcp_stdio_client import get_stdio_client
-from .types import AgentConfig
+from core.types import AgentConfig
+from integrations.microsoft import resolve_graph_access_token
+
+from .stdio_client import get_stdio_client
 
 
 def mcp_can_use_tools(config: AgentConfig) -> bool:
@@ -17,7 +18,7 @@ def mcp_can_use_tools(config: AgentConfig) -> bool:
 def load_mcp_tools(config: AgentConfig) -> list[dict[str, Any]]:
     """OpenAI-style function schemas from the MCP server over stdio."""
     if not mcp_can_use_tools(config):
-        raise RuntimeError("MCP stdio: set MCP_STDIO_ARGS (JSON) in .env.")
+        raise RuntimeError("MCP stdio: set mcp_stdio_args in config/runtime_config.json.")
     client = get_stdio_client(
         config.mcp_stdio_command,
         list(config.mcp_stdio_args),
@@ -29,7 +30,7 @@ def load_mcp_tools(config: AgentConfig) -> list[dict[str, Any]]:
 def filter_mcp_tools_when_graph_token_present(
     config: AgentConfig, tools: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
-    """When the agent already sends a Graph token, `microsoft_integration_status` is redundant — drop it from the manifest."""
+    """When the agent already sends a Graph token, drop microsoft_integration_status from manifest."""
     if not resolve_graph_access_token(config):
         return tools
     out: list[dict[str, Any]] = []

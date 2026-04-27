@@ -5,19 +5,19 @@ from datetime import datetime, timezone
 from typing import Any, Callable
 from urllib.parse import parse_qsl, unquote
 
-from openai import OpenAI
-
-from .mcp_tools import (
+from integrations.mcp import (
     filter_mcp_tools_when_graph_token_present,
     load_mcp_tools,
     mcp_can_use_tools,
     run_mcp_tool,
 )
-from .openrouter_pricing import build_compact_token_usage_footer
+from integrations.openrouter import (
+    build_compact_token_usage_footer,
+    build_openrouter_client,
+    normalize_model_name,
+)
 from .session_context import get_session_store
 from .types import AgentConfig
-
-OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
 MCP_AGENT_SYSTEM = """You are the jarvis1net assistant with tools provided by the MCP server.
 
@@ -84,17 +84,8 @@ def _manifest_tool_in_schema_list(mcp_tools: list[dict[str, Any]]) -> bool:
     return False
 
 
-def normalize_model_name(model: str) -> str:
-    if "/" not in model:
-        return f"openai/{model}"
-    return model
-
-
 def _simple_responses_reply(user_input: str, model: str, config: AgentConfig) -> str:
-    client = OpenAI(
-        api_key=config.openrouter_api_key,
-        base_url=OPENROUTER_BASE_URL,
-    )
+    client = build_openrouter_client(config.openrouter_api_key)
     try:
         response = client.responses.create(
             model=normalize_model_name(model),
@@ -132,7 +123,7 @@ def _usage_footer_cumulative(
         return (
             "\n\n- Tokens: no usage field in API responses (OpenRouter sometimes omits usage)."
             + (
-                " Hit MCP_MAX_TOOL_ROUNDS — raise it in .env (e.g. 24) or split the task."
+                " Hit mcp_max_tool_rounds limit — raise it in config/runtime_config.json (e.g. 24) or split the task."
                 if limit_hit
                 else ""
             )
@@ -401,10 +392,7 @@ def _chat_tool_loop(
     prior_messages: list[dict[str, str]],
     before_tool_round: Callable[[str], None] | None = None,
 ) -> str:
-    client = OpenAI(
-        api_key=config.openrouter_api_key,
-        base_url=OPENROUTER_BASE_URL,
-    )
+    client = build_openrouter_client(config.openrouter_api_key)
     model_id = normalize_model_name(model)
     messages: list[dict[str, Any]] = [
         {"role": "system", "content": _mcp_system_message(config)},
@@ -417,7 +405,7 @@ def _chat_tool_loop(
     except Exception as exc:
         return f"MCP tools manifest error: {exc}"
     if not mcp_tools:
-        return "No MCP tools are available (configure MCP stdio: MCP_STDIO_ARGS in .env or Docker defaults)."
+        return "No MCP tools are available (configure MCP stdio in config/runtime_config.json or Docker defaults)."
 
     pending_force_manifest = (
         _user_requests_mcp_tool_catalog(user_input) and _manifest_tool_in_schema_list(mcp_tools)

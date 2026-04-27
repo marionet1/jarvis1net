@@ -1,29 +1,27 @@
 import os
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 
-from .jarvis_runtime_settings import clear_jarvis_runtime_file, read_jarvis_runtime
-from .mcp_tools import load_mcp_tools
-from .microsoft_agent import (
+from integrations.mcp import load_mcp_tools
+from integrations.microsoft import (
     clear_settings_file,
     clear_token_cache_file,
     read_settings,
     resolve_graph_access_token,
 )
+
+from .jarvis_runtime_settings import clear_jarvis_runtime_file, read_jarvis_runtime
 from .session_context import get_session_store
 from .types import AgentConfig
 
-# Always repo root (…/agent-jarvis1net/.env), regardless of cwd (e.g. systemd WorkingDirectory=src).
 _DOTENV_PATH = Path(__file__).resolve().parents[2] / ".env"
+_RUNTIME_CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "runtime_config.json"
 
-# Short delegated names only; MSAL injects openid/profile/offline_access. Do not pass those three here.
-_DEFAULT_MS_SCOPES = (
-    "User.Read Mail.ReadWrite Mail.Send Calendars.ReadWrite Files.ReadWrite.All"
-)
-
+_DEFAULT_MS_SCOPES = "User.Read Mail.ReadWrite Mail.Send Calendars.ReadWrite Files.ReadWrite.All"
 _DEFAULT_TELEGRAM_STARTUP_MESSAGE = (
     "Hi — jarvis1net restarted. "
     "Conversation memory in this chat was cleared; we can continue from a fresh context."
@@ -31,7 +29,6 @@ _DEFAULT_TELEGRAM_STARTUP_MESSAGE = (
 
 
 def _validated_display_timezone(raw: str) -> str:
-    """IANA name (e.g. Europe/Warsaw). Empty = none — model does not get UTC→local conversion rules."""
     name = raw.strip()
     if not name:
         return ""
@@ -43,77 +40,87 @@ def _validated_display_timezone(raw: str) -> str:
     return name
 
 
-def _env_bool(key: str, default: bool) -> bool:
-    v = os.getenv(key, "").strip().lower()
-    if v == "":
-        return default
-    return v in ("1", "true", "yes", "on", "tak")
+def _as_bool(value: object, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        v = value.strip().lower()
+        if v in ("1", "true", "yes", "on", "tak"):
+            return True
+        if v in ("0", "false", "no", "off", "nie"):
+            return False
+    return default
+
+
+def _load_runtime_config() -> dict[str, object]:
+    try:
+        raw = json.loads(_RUNTIME_CONFIG_PATH.read_text(encoding="utf-8"))
+        if isinstance(raw, dict):
+            return raw
+    except Exception:
+        pass
+    return {}
 
 
 def load_config() -> AgentConfig:
     load_dotenv(_DOTENV_PATH)
-    telegram_allowed_raw = os.getenv("TELEGRAM_ALLOWED_CHAT_IDS", "").strip()
-    telegram_allowed_ids = [x.strip() for x in telegram_allowed_raw.split(",") if x.strip()]
-    telegram_notify_on_start = _env_bool("TELEGRAM_NOTIFY_ON_START", True)
-    telegram_clear_session_on_start = _env_bool("TELEGRAM_CLEAR_SESSION_ON_START", True)
-    telegram_startup_msg_raw = os.getenv("TELEGRAM_STARTUP_MESSAGE", "").strip()
-    telegram_startup_message = (
-        telegram_startup_msg_raw if telegram_startup_msg_raw else _DEFAULT_TELEGRAM_STARTUP_MESSAGE
-    )
-    telegram_timeout_raw = os.getenv("TELEGRAM_POLLING_TIMEOUT_SEC", "25").strip()
+    cfg = _load_runtime_config()
+
+    allowed_raw = cfg.get("telegram_allowed_chat_ids", [])
+    telegram_allowed_ids = [str(x).strip() for x in allowed_raw if str(x).strip()] if isinstance(allowed_raw, list) else []
+    telegram_notify_on_start = _as_bool(cfg.get("telegram_notify_on_start", True), True)
+    telegram_clear_session_on_start = _as_bool(cfg.get("telegram_clear_session_on_start", True), True)
+    telegram_startup_raw = str(cfg.get("telegram_startup_message", "")).strip()
+    telegram_startup_message = telegram_startup_raw or _DEFAULT_TELEGRAM_STARTUP_MESSAGE
+    telegram_timeout_raw = str(cfg.get("telegram_polling_timeout_sec", 25)).strip()
     try:
         telegram_polling_timeout = max(5, int(telegram_timeout_raw))
     except ValueError:
         telegram_polling_timeout = 25
-    mcp_timeout_raw = os.getenv("MCP_TIMEOUT_SEC", "15").strip()
+    mcp_timeout_raw = str(cfg.get("mcp_timeout_sec", 15)).strip()
     try:
         mcp_timeout = max(3, int(mcp_timeout_raw))
     except ValueError:
         mcp_timeout = 15
-    mcp_tool_rounds_raw = os.getenv("MCP_MAX_TOOL_ROUNDS", "18").strip()
+    mcp_tool_rounds_raw = str(cfg.get("mcp_max_tool_rounds", 18)).strip()
     try:
         mcp_max_tool_rounds = max(1, min(48, int(mcp_tool_rounds_raw)))
     except ValueError:
         mcp_max_tool_rounds = 18
-    mcp_tool_cap_raw = os.getenv("MCP_TOOL_RESULT_MAX_CHARS", "40000").strip()
+    mcp_tool_cap_raw = str(cfg.get("mcp_tool_result_max_chars", 40000)).strip()
     try:
         mcp_tool_result_max_chars = max(4000, min(200_000, int(mcp_tool_cap_raw)))
     except ValueError:
         mcp_tool_result_max_chars = 40_000
 
-    ms_tool_cap_raw = os.getenv("MCP_MICROSOFT_TOOL_RESULT_MAX_CHARS", "12000").strip()
+    ms_tool_cap_raw = str(cfg.get("mcp_microsoft_tool_result_max_chars", 12000)).strip()
     try:
-        mcp_microsoft_tool_result_max_chars = max(
-            3000, min(mcp_tool_result_max_chars, int(ms_tool_cap_raw))
-        )
+        mcp_microsoft_tool_result_max_chars = max(3000, min(mcp_tool_result_max_chars, int(ms_tool_cap_raw)))
     except ValueError:
         mcp_microsoft_tool_result_max_chars = min(12_000, mcp_tool_result_max_chars)
 
-    chat_max_out_raw = os.getenv("MCP_CHAT_COMPLETION_MAX_TOKENS", "10240").strip()
+    chat_max_out_raw = str(cfg.get("mcp_chat_completion_max_tokens", 10240)).strip()
     try:
         mcp_chat_completion_max_tokens = max(2048, min(32_768, int(chat_max_out_raw)))
     except ValueError:
         mcp_chat_completion_max_tokens = 10_240
 
-    audit_log_path = os.getenv("AUDIT_LOG_PATH", "/home/jump/agent-jarvis1net/logs/audit.jsonl")
-    session_ctx_env = os.getenv("SESSION_CONTEXT_PATH", "").strip()
+    audit_log_path = str(cfg.get("audit_log_path", "/app/data/audit.jsonl")).strip() or "/app/data/audit.jsonl"
+    session_ctx_env = str(cfg.get("session_context_path", "")).strip()
     if session_ctx_env:
         session_context_path = session_ctx_env
     else:
         session_context_path = str(Path(audit_log_path).expanduser().resolve().parent / "session_paths.json")
 
-    graph_token = os.getenv("MICROSOFT_GRAPH_ACCESS_TOKEN", "").strip()
+    graph_token = os.getenv("MCP_GRAPH_ACCESS_TOKEN", "").strip()
     rt = read_settings(audit_log_path)
     if not graph_token:
         rt_tok = rt.get("graph_access_token")
         if isinstance(rt_tok, str) and rt_tok.strip():
             graph_token = rt_tok.strip()
 
-    ms_client = os.getenv("MICROSOFT_CLIENT_ID", "").strip() or str(rt.get("client_id") or "").strip()
-
-    # Runtime file tenant (Telegram /microsoft-set-client) wins over .env —
-    # otherwise MICROSOFT_TENANT_ID=organizations in .env would block e.g. … consumers (personal account).
-    ms_tenant_env = os.getenv("MICROSOFT_TENANT_ID", "").strip()
+    ms_client = str(cfg.get("microsoft_client_id", "")).strip() or str(rt.get("client_id") or "").strip()
+    ms_tenant_env = str(cfg.get("microsoft_tenant_id", "")).strip()
     rt_tenant = str(rt.get("tenant_id") or "").strip()
     if rt_tenant:
         ms_tenant = rt_tenant
@@ -122,9 +129,9 @@ def load_config() -> AgentConfig:
     else:
         ms_tenant = "consumers"
 
-    scopes_env = os.getenv("MICROSOFT_GRAPH_SCOPES", "").strip()
-    if scopes_env:
-        ms_scopes = [s.strip() for s in scopes_env.replace(",", " ").split() if s.strip()]
+    scopes_raw = cfg.get("microsoft_graph_scopes", [])
+    if isinstance(scopes_raw, list) and scopes_raw:
+        ms_scopes = [str(s).strip() for s in scopes_raw if str(s).strip()]
     else:
         gs = rt.get("graph_scopes")
         if isinstance(gs, list) and gs:
@@ -133,27 +140,17 @@ def load_config() -> AgentConfig:
             ms_scopes = [s.strip() for s in gs.replace(",", " ").split() if s.strip()]
         else:
             ms_scopes = [s.strip() for s in _DEFAULT_MS_SCOPES.split() if s.strip()]
-    ms_cache_env = os.getenv("MICROSOFT_TOKEN_CACHE_PATH", "").strip()
+    ms_cache_env = str(cfg.get("microsoft_token_cache_path", "")).strip()
     if ms_cache_env:
         ms_cache = ms_cache_env
     else:
         ms_cache = str(Path(audit_log_path).expanduser().resolve().parent / "ms_graph_token_cache.json")
 
-    display_timezone = _validated_display_timezone(os.getenv("DISPLAY_TIMEZONE", "").strip())
-    openrouter_show_cost_estimate = _env_bool("OPENROUTER_SHOW_COST_ESTIMATE", True)
-
-    mcp_stdio_cmd = os.getenv("MCP_STDIO_COMMAND", "python3").strip() or "python3"
-    mcp_stdio_args: list[str] = []
-    raw_args = os.getenv("MCP_STDIO_ARGS", "").strip()
-    if raw_args:
-        import json
-
-        try:
-            parsed = json.loads(raw_args)
-        except json.JSONDecodeError:
-            parsed = None
-        if isinstance(parsed, list) and all(isinstance(x, str) for x in parsed):
-            mcp_stdio_args = [str(x) for x in parsed]
+    display_timezone = _validated_display_timezone(str(cfg.get("display_timezone", "")).strip())
+    openrouter_show_cost_estimate = _as_bool(cfg.get("openrouter_show_cost_estimate", True), True)
+    mcp_stdio_cmd = str(cfg.get("mcp_stdio_command", "python3")).strip() or "python3"
+    raw_args = cfg.get("mcp_stdio_args", [])
+    mcp_stdio_args = [str(x) for x in raw_args if str(x).strip()] if isinstance(raw_args, list) else []
 
     openrouter_key = os.getenv("OPENROUTER_API_KEY", "").strip()
     jrt = read_jarvis_runtime(audit_log_path)
@@ -162,7 +159,7 @@ def load_config() -> AgentConfig:
         openrouter_key = j_or.strip()
 
     return AgentConfig(
-        model=os.getenv("MODEL", "o4-mini"),
+        model=str(cfg.get("model", "o4-mini")).strip() or "o4-mini",
         openrouter_api_key=openrouter_key,
         telegram_bot_token=os.getenv("TELEGRAM_BOT_TOKEN", "").strip(),
         telegram_allowed_chat_ids=telegram_allowed_ids,
@@ -186,16 +183,12 @@ def load_config() -> AgentConfig:
         microsoft_graph_scopes=ms_scopes,
         microsoft_token_cache_path=ms_cache,
         display_timezone=display_timezone,
+        jarvis_no_docker_exit_restart=_as_bool(cfg.get("jarvis_no_docker_exit_restart", False), False),
     )
-
-
-# --- Startup checks and reset (Telegram / CLI reports) -----------------------------------------
 
 
 @dataclass
 class StartupCheckResult:
-    """`blocking` empty = LLM chat is allowed. `mcp_summary` / `graph_summary` short lines for the OK report."""
-
     ok: bool
     mcp_summary: str = ""
     graph_summary: str = ""
@@ -208,8 +201,8 @@ def run_startup_checks(config: AgentConfig) -> StartupCheckResult:
     warnings: list[str] = []
 
     if not (config.mcp_stdio_args and config.mcp_stdio_command):
-        mcp_summary = "stdio not configured (set MCP_STDIO_ARGS)"
-        warnings.append("MCP: configure stdio args for Python module (see README / Docker).")
+        mcp_summary = "stdio not configured (set mcp_stdio_args)"
+        warnings.append("MCP: configure mcp_stdio_command + mcp_stdio_args in config/runtime_config.json.")
     else:
         try:
             _ = load_mcp_tools(config)
@@ -240,7 +233,7 @@ def run_startup_checks(config: AgentConfig) -> StartupCheckResult:
 
     if not config.telegram_allowed_chat_ids:
         warnings.append(
-            "TELEGRAM_ALLOWED_CHAT_IDS empty — anyone with the bot link can chat; production: set chat_id list in .env."
+            "telegram_allowed_chat_ids empty — anyone with the bot link can chat; production: set chat_id list in config/runtime_config.json."
         )
 
     return StartupCheckResult(
@@ -253,7 +246,6 @@ def run_startup_checks(config: AgentConfig) -> StartupCheckResult:
 
 
 def format_startup_report_plain(result: StartupCheckResult, *, title: str = "jarvis1net configuration") -> str:
-    """Short plain text for Telegram / logs."""
     if result.ok:
         lines = [
             title,
@@ -274,7 +266,7 @@ def format_startup_report_plain(result: StartupCheckResult, *, title: str = "jar
     lines.append("")
     lines.append(
         "First: /jarvis-set-openrouter-key <key from https://openrouter.ai/keys> (saved on disk, survives restarts). "
-        "Then MCP: stdio via .env (Docker/README); "
+        "Then MCP: stdio via config/runtime_config.json (Docker/README); "
         "Microsoft: /microsoft-set-client + /microsoft-login or /microsoft-set-graph-token. "
         "Clear saved keys: /jarvis-config-reset."
     )
@@ -282,9 +274,6 @@ def format_startup_report_plain(result: StartupCheckResult, *, title: str = "jar
 
 
 def reset_runtime_agent_state(config: AgentConfig) -> list[str]:
-    """
-    Clears chat-saved runtime + MSAL cache + conversation memory + jarvis_runtime_secrets.json. Does not remove .env.
-    """
     out: list[str] = []
     out.append(clear_settings_file(config.audit_log_path))
     out.append(clear_jarvis_runtime_file(config.audit_log_path))

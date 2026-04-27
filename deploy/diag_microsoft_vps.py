@@ -8,8 +8,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 os.chdir(Path(__file__).resolve().parent.parent / "src")
 
-from core.config import load_config  # noqa: E402
-from core.microsoft_agent import read_settings, resolve_graph_access_token, settings_path  # noqa: E402
+from core.runtime_config import load_config  # noqa: E402
+from integrations.microsoft import read_settings, resolve_graph_access_token, settings_path  # noqa: E402
 
 
 def main() -> None:

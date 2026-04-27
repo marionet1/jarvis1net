@@ -1,4 +1,4 @@
-"""Microsoft on the agent: JSON runtime settings next to logs + MSAL device flow and token cache."""
+"""Microsoft integration for agent-side auth/runtime token handling."""
 
 from __future__ import annotations
 
@@ -10,9 +10,7 @@ from typing import Any
 
 import msal
 
-from .types import AgentConfig
-
-# --- Runtime settings file (microsoft_agent_settings.json) -------------------------------------
+from core.types import AgentConfig
 
 _SETTINGS_NAME = "microsoft_agent_settings.json"
 
@@ -63,26 +61,17 @@ def validate_client_id(value: str) -> bool:
     return bool(_CLIENT_ID_RE.match(value.strip()))
 
 
-# --- MSAL: device flow + token cache -----------------------------------------------------------
-
 def _authority(tenant_id: str) -> str:
     tid = (tenant_id or "consumers").strip() or "consumers"
     return f"https://login.microsoftonline.com/{tid}"
 
 
 def recommended_native_redirect_uri(tenant_id: str) -> str:
-    """
-    Single redirect URI (Mobile and desktop) — same segment as ``MICROSOFT_TENANT_ID`` / authority.
-
-    For **work** accounts prefer ``organizations`` (not ``common``): with ``common`` Microsoft
-    often adds a second login step on ``nativeclient`` that fails with ``response_type`` for many users.
-    """
     tid = (tenant_id or "consumers").strip() or "consumers"
     return f"https://login.microsoftonline.com/{tid}/oauth2/nativeclient"
 
 
 def recommended_native_redirect_uris(tenant_id: str) -> list[str]:
-    """Single-element list for display (one redirect URI per authority)."""
     return [recommended_native_redirect_uri(tenant_id)]
 
 
@@ -94,12 +83,11 @@ _MSAL_SCOPE_BLOCKLIST = frozenset(s.casefold() for s in ("offline_access", "open
 
 
 def _msal_request_scopes(config: AgentConfig) -> list[str]:
-    """Short delegated Graph names (e.g. User.Read) like MSAL device flow samples; MSAL adds openid/profile/offline_access."""
     out = [s.strip() for s in _scopes(config) if s.strip() and s.strip().casefold() not in _MSAL_SCOPE_BLOCKLIST]
     if not out:
         raise RuntimeError(
             "No Graph scopes after filtering reserved (offline_access/openid/profile). "
-            "Set e.g. User.Read Mail.ReadWrite in /microsoft-set-scopes or MICROSOFT_GRAPH_SCOPES."
+            "Set e.g. User.Read Mail.ReadWrite in /microsoft-set-scopes or runtime_config.json."
         )
     return out
 
@@ -111,7 +99,7 @@ def _cache_path(config: AgentConfig) -> Path:
 def _public_app(config: AgentConfig) -> tuple[msal.PublicClientApplication, msal.SerializableTokenCache]:
     cid = config.microsoft_client_id.strip()
     if not cid:
-        raise RuntimeError("MICROSOFT_CLIENT_ID is not set.")
+        raise RuntimeError("microsoft_client_id is not set in runtime config.")
     cache = msal.SerializableTokenCache()
     path = _cache_path(config)
     if path.exists():
@@ -136,7 +124,6 @@ def _persist_cache(cache: msal.SerializableTokenCache, config: AgentConfig) -> N
 
 
 def get_graph_access_token_silent(config: AgentConfig) -> str | None:
-    """Returns a valid access token from MSAL cache, or None."""
     if not config.microsoft_client_id.strip():
         return None
     app, cache = _public_app(config)
@@ -152,7 +139,6 @@ def get_graph_access_token_silent(config: AgentConfig) -> str | None:
 
 
 def resolve_graph_access_token(config: AgentConfig) -> str | None:
-    """Static env token wins; otherwise MSAL silent from disk cache."""
     static = config.microsoft_graph_access_token.strip()
     if static:
         if static.lower().startswith("bearer "):
@@ -162,10 +148,6 @@ def resolve_graph_access_token(config: AgentConfig) -> str | None:
 
 
 def run_device_code_login(config: AgentConfig, notify: Callable[[str], None]) -> str:
-    """
-    Runs full device code flow: notify() gets Microsoft's instruction line (URL + code), then blocks until done.
-    Returns a short user-facing summary.
-    """
     app, cache = _public_app(config)
     flow = app.initiate_device_flow(scopes=_msal_request_scopes(config))
     if "user_code" not in flow:
@@ -198,7 +180,6 @@ def run_device_code_login(config: AgentConfig, notify: Callable[[str], None]) ->
 
 
 def clear_token_cache_file(config: AgentConfig) -> str:
-    """Removes local MSAL cache (logout for this agent)."""
     path = _cache_path(config)
     try:
         if path.exists():

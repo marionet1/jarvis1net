@@ -13,7 +13,13 @@ import requests
 
 from core.audit import write_audit_event
 from core.chat_phrases import CLEAR_HISTORY_PHRASES
-from core.config import (
+from core.command_shared import (
+    parse_microsoft_set_client,
+    parse_microsoft_set_graph_token,
+    parse_microsoft_set_scopes,
+    parse_microsoft_set_tenant,
+)
+from core.runtime_config import (
     StartupCheckResult,
     format_startup_report_plain,
     load_config,
@@ -22,12 +28,14 @@ from core.config import (
 )
 from core.jarvis_runtime_settings import save_merged_jarvis_runtime
 from core.llm import get_llm_reply
-from core.mcp_tools import (
+from integrations.mcp import (
     filter_mcp_tools_when_graph_token_present,
     load_mcp_tools,
     mcp_can_use_tools,
 )
-from core.microsoft_agent import (
+from core.session_context import get_session_store
+from core.types import AgentConfig
+from integrations.microsoft import (
     clear_settings_file,
     clear_token_cache_file,
     read_settings,
@@ -35,14 +43,10 @@ from core.microsoft_agent import (
     run_device_code_login,
     save_merged_settings,
     settings_path,
-    validate_client_id,
 )
-from core.session_context import get_session_store
-from core.types import AgentConfig
 
 
 def _looks_like_telegram_chat_key(key: str) -> bool:
-    """Session key is usually numeric chat_id (groups may use a negative id)."""
     s = key.strip()
     if not s:
         return False
@@ -54,7 +58,6 @@ def _looks_like_telegram_chat_key(key: str) -> bool:
 def run_telegram_startup_hooks(
     config: AgentConfig, *, startup_check: StartupCheckResult | None = None
 ) -> None:
-    """After process restart: optionally clear sessions, send startup message and config report."""
     chk = startup_check if startup_check is not None else run_startup_checks(config)
     if not config.telegram_clear_session_on_start and not config.telegram_notify_on_start:
         return
@@ -108,7 +111,6 @@ def run_telegram_startup_hooks(
             print(f"jarvis1net: config report to chat_id={cid_s} failed: {exc}")
 
 
-# Exact message text (no slash) — avoids accidental “restart” inside a sentence.
 _RESTART_BOT_PHRASES = frozenset(
     {
         "restart bot",
@@ -127,30 +129,21 @@ def _restart_from_chat_allowed(config: AgentConfig, chat_id_s: str) -> bool:
 
 
 def _running_in_docker() -> bool:
-    """Docker creates /.dockerenv in containers; host systemd restart does not apply there."""
     return Path("/.dockerenv").is_file()
 
 
 def _jarvis_secrets_from_chat_allowed(config: AgentConfig, chat_id_s: str) -> bool:
-    """If TELEGRAM_ALLOWED_CHAT_IDS is empty anyone can save keys (bootstrap risk); else whitelist only."""
     if not config.telegram_allowed_chat_ids:
         return True
     return chat_id_s in config.telegram_allowed_chat_ids
 
 
-def _schedule_telegram_self_restart() -> None:
-    """Delayed restart: Docker = exit process so the container restarts; else user systemd unit."""
-
+def _schedule_telegram_self_restart(config: AgentConfig) -> None:
     def worker() -> None:
         time.sleep(1.5)
-        if _running_in_docker() and os.getenv("JARVIS_NO_DOCKER_EXIT_RESTART", "").strip().lower() not in (
-            "1",
-            "true",
-            "yes",
-        ):
-            # `restart: unless-stopped` in compose brings the service back; systemctl in-container is wrong target.
+        if _running_in_docker() and not config.jarvis_no_docker_exit_restart:
             print("jarvis1net: /restart in Docker — exiting process (expect container restart).")
-            os._exit(0)  # noqa: PLR1722 — must not return; whole process must end for Docker restart policy
+            os._exit(0)  # noqa: PLR1722
         try:
             subprocess.run(
                 ["systemctl", "--user", "restart", "jarvis1net-telegram.service"],
@@ -168,8 +161,6 @@ def _schedule_telegram_self_restart() -> None:
 
 @dataclass(frozen=True)
 class TelegramOut:
-    """Telegram payload: plain text or HTML (parse_mode)."""
-
     text: str
     parse_mode: str | None = None
 
@@ -178,12 +169,10 @@ _INFO_HTML_MAX = 3800
 
 
 def _cmd_line(cmd: str, description: str) -> str:
-    """One BotFather-style line: /command - description (HTML)."""
     return f"{html.escape(cmd)} - {html.escape(description)}\n"
 
 
 def _commands_info_botfather_style_html() -> str:
-    """Bold sections + “/command - description” list like @BotFather."""
     parts: list[str] = [
         "You can control the bot with these commands:\n\n",
         "<b>General</b>\n\n",
@@ -227,7 +216,6 @@ def _commands_info_botfather_style_html() -> str:
 
 
 def build_info_html_chunks(config: AgentConfig) -> list[str]:
-    """One or more HTML chunks (&lt; 4096 chars each) — commands + MCP tools."""
     cmd_html = _commands_info_botfather_style_html()
     spec = f"{html.escape(config.mcp_stdio_command)} {' '.join(html.escape(x) for x in config.mcp_stdio_args)}"
     mcp_head = f"<i>MCP (stdio):</i> <code>{spec}</code>\n\n"
@@ -239,10 +227,9 @@ def build_info_html_chunks(config: AgentConfig) -> list[str]:
     )
     chunks: list[str] = []
     current = head
-    mcp_note = ""
 
     if not mcp_can_use_tools(config):
-        mcp_note = "<b>MCP</b>: <i>not configured — set MCP_STDIO_ARGS in .env (or Docker image defaults).</i>\n"
+        mcp_note = "<b>MCP</b>: <i>not configured — set mcp_stdio_args in config/runtime_config.json (or Docker image defaults).</i>\n"
         one = (current + mcp_note)[:_INFO_HTML_MAX]
         return [one]
 
@@ -342,11 +329,11 @@ def process_message(
         if not _restart_from_chat_allowed(config, chat_id_s):
             if not config.telegram_allowed_chat_ids:
                 return [
-                    "Restart from chat works only if you set TELEGRAM_ALLOWED_CHAT_IDS in .env "
+                    "Restart from chat works only if you set telegram_allowed_chat_ids in config/runtime_config.json "
                     "(then only those chats may send /restart)."
                 ]
             return ["No permission to restart from this chat."]
-        _schedule_telegram_self_restart()
+        _schedule_telegram_self_restart(config)
         if _running_in_docker():
             return [
                 "OK — w ~2 s kończę proces Pythona w kontenerze; Docker powinien włączyć bota z powrotem "
@@ -410,7 +397,7 @@ def process_message(
         if not _restart_from_chat_allowed(config, chat_id_s):
             if not config.telegram_allowed_chat_ids:
                 return [
-                    "Reset from chat works only if you set TELEGRAM_ALLOWED_CHAT_IDS in .env "
+                    "Reset from chat works only if you set telegram_allowed_chat_ids in config/runtime_config.json "
                     "(only those chats may send /jarvis-config-reset)."
                 ]
             return ["No permission to reset from this chat."]
@@ -435,60 +422,54 @@ def process_message(
             + f"- OPENROUTER_SHOW_COST_ESTIMATE: {1 if config.openrouter_show_cost_estimate else 0} "
             + "(footer ~USD from /api/v1/models pricing)\n"
             + f"- DISPLAY_TIMEZONE: {config.display_timezone or '(none — model quotes Graph times as UTC/Z)'}\n"
-            + f"- .env file: {Path(__file__).resolve().parents[1] / '.env'}\n"
-            + "To change: edit .env in the repo root (not src/) and restart the bot."
+            + f"- .env file: {Path(__file__).resolve().parents[2] / '.env'}\n"
+            + "To change: edit config/runtime_config.json in the repo root and restart the bot."
         )
         return [lim]
 
     if command_base == "/microsoft-set-client":
-        parts = stripped.split()
-        if len(parts) < 2:
+        ok, error, payload = parse_microsoft_set_client(stripped)
+        if not ok or payload is None:
             return [
-                "Usage: /microsoft-set-client <Application-Client-ID> [tenant]\n"
+                f"{error}\n"
+                "Usage details:\n"
+                "/microsoft-set-client <Application-Client-ID> [tenant]\n"
                 "tenant: e.g. organizations, common, consumers, or directory GUID (default consumers — personal MSA; work: organizations).\n"
                 "In Azure: app registration → public client + device code + Allow public client flows."
             ]
-        cid = parts[1].strip()
-        tenant = parts[2].strip() if len(parts) > 2 else "consumers"
-        if not validate_client_id(cid):
-            return ["Client ID must be a full UUID (8-4-4-4-12 from Azure Portal)."]
-        save_merged_settings(config.audit_log_path, {"client_id": cid, "tenant_id": tenant})
+        tenant = str(payload["tenant_id"])
+        save_merged_settings(config.audit_log_path, payload)
         return [
             f"Saved Client ID (tenant: {tenant}). Next send /microsoft-login — no bot restart needed."
         ]
 
     if command_base == "/microsoft-set-tenant":
-        parts = stripped.split()
-        if len(parts) < 2:
+        ok, error, tenant = parse_microsoft_set_tenant(stripped)
+        if not ok or tenant is None:
             return [
-                "Usage: /microsoft-set-tenant <consumers|organizations|common|directory-GUID>\n"
+                f"{error}\n"
+                "Usage details:\n"
+                "/microsoft-set-tenant <consumers|organizations|common|directory-GUID>\n"
                 "— consumers: personal Microsoft account (Azure redirect: …/consumers/oauth2/nativeclient).\n"
                 "— organizations: work/school account (redirect …/organizations/…).\n"
                 "— common: MSA + orgs (redirect …/common/…; can be finicky).\n"
                 "Then /microsoft-logout and /microsoft-login."
             ]
-        raw = parts[1].strip()
-        t = raw.casefold()
-        ok = t in ("common", "organizations", "consumers") or validate_client_id(raw)
-        if not ok:
-            return ["Unknown tenant — use consumers, organizations, common, or directory GUID from Azure."]
-        save_merged_settings(config.audit_log_path, {"tenant_id": raw})
+        save_merged_settings(config.audit_log_path, {"tenant_id": tenant})
         return [
-            f"Saved tenant: {raw}. Next /microsoft-logout → /microsoft-login (Azure redirect must match this segment)."
+            f"Saved tenant: {tenant}. Next /microsoft-logout → /microsoft-login (Azure redirect must match this segment)."
         ]
 
     if command_base in {"/microsoft-set-scopes", "/microsoft-scopes"}:
-        parts = stripped.split(None, 1)
-        if len(parts) < 2 or not parts[1].strip():
+        ok, error, scope_list = parse_microsoft_set_scopes(stripped)
+        if scope_list is None:
             scopes_txt = " ".join(config.microsoft_graph_scopes)
             return [
                 "Usage: /microsoft-set-scopes User.Read Mail.Read …\n"
                 f"Currently (effective): {scopes_txt}"
             ]
-        raw_scopes = parts[1].strip()
-        scope_list = [s.strip() for s in raw_scopes.replace(",", " ").split() if s.strip()]
-        if not scope_list:
-            return ["Provide at least one scope."]
+        if not ok or scope_list is None:
+            return [error]
         save_merged_settings(config.audit_log_path, {"graph_scopes": scope_list})
         return [
             f"Saved {len(scope_list)} scope(s). Matching delegated permissions must exist in Azure. Then /microsoft-login."
@@ -496,26 +477,20 @@ def process_message(
 
     if command_base in {"/microsoft-show-settings", "/microsoft-config"}:
         rt = read_settings(config.audit_log_path)
-        cid_env = os.getenv("MICROSOFT_CLIENT_ID", "").strip()
-        src = "MICROSOFT_CLIENT_ID in .env" if cid_env else (
-            "microsoft_agent_settings.json (chat/CLI)" if rt.get("client_id") else "none"
-        )
+        src = "runtime settings file" if rt.get("client_id") else "runtime config"
         has_cache = Path(config.microsoft_token_cache_path).expanduser().exists()
         cid_show = config.microsoft_client_id or "(none)"
-        ten_env = os.getenv("MICROSOFT_TENANT_ID", "").strip()
         ten_rt = str(rt.get("tenant_id") or "").strip()
         if ten_rt:
-            ten_src = "microsoft_agent_settings.json (overrides .env)"
-        elif ten_env:
-            ten_src = "MICROSOFT_TENANT_ID in .env"
+            ten_src = "microsoft_agent_settings.json (overrides config)"
         else:
-            ten_src = "default consumers (no file and no env)"
-        tok_env = bool(os.getenv("MICROSOFT_GRAPH_ACCESS_TOKEN", "").strip())
+            ten_src = "runtime config default"
+        tok_env = bool(os.getenv("MCP_GRAPH_ACCESS_TOKEN", "").strip())
         tok_rt = bool(
             isinstance(rt.get("graph_access_token"), str) and str(rt.get("graph_access_token")).strip()
         )
         if tok_env:
-            tok_src = "MICROSOFT_GRAPH_ACCESS_TOKEN (.env)"
+            tok_src = "MCP_GRAPH_ACCESS_TOKEN (.env)"
         elif tok_rt:
             tok_src = "graph_access_token (microsoft_agent_settings.json, e.g. /microsoft-set-graph-token)"
         else:
@@ -542,21 +517,18 @@ def process_message(
         return [clear_settings_file(config.audit_log_path)]
 
     if command_base in {"/microsoft-set-graph-token", "/microsoft-paste-token"}:
-        parts = stripped.split(None, 1)
-        if len(parts) < 2 or not parts[1].strip():
+        ok, error, token = parse_microsoft_set_graph_token(stripped)
+        if token is None:
             return [
                 "Usage: /microsoft-set-graph-token <access_token>\n\n"
                 "On your PC (after az login): "
                 "az account get-access-token --resource https://graph.microsoft.com -o tsv\n"
                 "Paste the output here (one line). Token is saved to microsoft_agent_settings.json next to logs — "
-                "do not share the chat. Overrides .env only if MICROSOFT_GRAPH_ACCESS_TOKEN is empty."
+                "do not share the chat. Overrides .env only if MCP_GRAPH_ACCESS_TOKEN is empty."
             ]
-        tok = parts[1].strip()
-        if tok.casefold().startswith("bearer "):
-            tok = tok[7:].strip()
-        if len(tok) < 30:
-            return ["Token looks too short — ensure you pasted the full access_token (JWT)."]
-        save_merged_settings(config.audit_log_path, {"graph_access_token": tok})
+        if not ok or token is None:
+            return [f"{error} Ensure you pasted the full access_token (JWT)."]
+        save_merged_settings(config.audit_log_path, {"graph_access_token": token})
         return [
             "Saved Graph token (runtime). Next microsoft_* MCP calls use it instead of MSAL. "
             "Logout: /microsoft-logout (clears this token too)."
@@ -567,7 +539,7 @@ def process_message(
         if not cfg.microsoft_client_id.strip():
             return [
                 "No Client ID. In chat send: /microsoft-set-client <UUID from Azure> [tenant]\n"
-                "or set MICROSOFT_CLIENT_ID in .env and restart the bot."
+                "or set microsoft_client_id in config/runtime_config.json and restart the bot."
             ]
 
         bot_token = cfg.telegram_bot_token

@@ -10,8 +10,8 @@ Related repositories:
 ## What this agent provides
 
 - Chat responses via OpenRouter.
-- Telegram bot mode (`src/telegram_bot.py`) and CLI mode (`src/main.py`).
-- MCP tool calls (filesystem, shell diagnostics, Microsoft Graph tools).
+- Telegram bot mode (`src/channels/telegram.py`) and CLI mode (`src/main.py`).
+- MCP tool calls delegated to `mcp-jarvis1net` over stdio.
 - Runtime session context and JSONL audit logging.
 - Optional Microsoft Graph integration (MSAL device code flow).
 
@@ -19,7 +19,7 @@ Related repositories:
 
 - Python 3.12+
 - OpenRouter API key (`OPENROUTER_API_KEY` or `/jarvis-set-openrouter-key`)
-- A reachable MCP stdio server command configured in `.env`
+- A reachable MCP stdio server command configured in `config/runtime_config.json`
 
 ## Recommended run mode (Docker stack)
 
@@ -49,11 +49,13 @@ cp .env.example .env
 python3 src/main.py
 ```
 
-If running this repository outside the Docker stack, make sure `.env` points to the MCP server:
+If running this repository outside the Docker stack, make sure `config/runtime_config.json` points to the MCP server:
 
-```dotenv
-MCP_STDIO_COMMAND=python3
-MCP_STDIO_ARGS=["/absolute/path/to/mcp-jarvis1net/src/server.py"]
+```json
+{
+  "mcp_stdio_command": "python3",
+  "mcp_stdio_args": ["/absolute/path/to/mcp-jarvis1net/src/server.py"]
+}
 ```
 
 ## Telegram commands
@@ -67,25 +69,28 @@ MCP_STDIO_ARGS=["/absolute/path/to/mcp-jarvis1net/src/server.py"]
 - `/jarvis-limits`
 - `/microsoft-*`
 
-For production, set `TELEGRAM_ALLOWED_CHAT_IDS`.
+For production, set `telegram_allowed_chat_ids` in `config/runtime_config.json`.
 
-## Environment variables
+## Configuration
 
-See `.env.example` for full documentation.
-
-Main groups:
-- OpenRouter: `OPENROUTER_API_KEY`, `MODEL`, `OPENROUTER_SHOW_COST_ESTIMATE`
-- Telegram: `TELEGRAM_*`, `TELEGRAM_ALLOWED_CHAT_IDS`
-- MCP: `MCP_STDIO_COMMAND`, `MCP_STDIO_ARGS`, `MCP_ALLOWED_ROOTS`, `MCP_*` limits
-- Paths: `AUDIT_LOG_PATH`, `SESSION_CONTEXT_PATH`
-- Microsoft: `MICROSOFT_*`
-- Timezone: `DISPLAY_TIMEZONE` (IANA, e.g. `Europe/Warsaw`)
+- Secrets in `.env` (see `.env.example`):
+  - `OPENROUTER_API_KEY`
+  - `TELEGRAM_BOT_TOKEN`
+  - optional `MCP_GRAPH_ACCESS_TOKEN`
+- Non-secret runtime settings in `config/runtime_config.json`:
+  - model, Telegram behavior, MCP stdio command/args, timeouts, paths, Microsoft tenant/scopes, timezone.
 
 ## Project layout
 
-- `src/core/` - core runtime logic
+- `config/runtime_config.json` - single place for non-secret runtime config
+- `src/core/` - agent runtime (LLM loop, typed config model, session/audit)
+- `src/core/runtime_config.py` - runtime config loader + startup checks/reset helpers
+- `src/integrations/mcp/` - MCP stdio client + tool bridge integration
+- `src/integrations/microsoft/` - Microsoft auth/cache integration
+- `src/integrations/openrouter/` - OpenRouter client + pricing/cost helpers
+- `src/channels/` - channel-facing modules (CLI, Telegram helpers)
 - `src/main.py` - CLI entry point
-- `src/telegram_bot.py` - Telegram entry point
+- `src/channels/telegram.py` - Telegram entry point
 - `deploy/` - deployment helper scripts
 
 ## License

@@ -1,0 +1,32 @@
+{
+  "model": "o4-mini",
+  "openrouter_show_cost_estimate": true,
+  "telegram_allowed_chat_ids": [],
+  "telegram_notify_on_start": true,
+  "telegram_clear_session_on_start": true,
+  "telegram_startup_message": "Hi - jarvis1net restarted. Conversation memory in this chat was cleared; we can continue from a fresh context.",
+  "telegram_polling_timeout_sec": 25,
+  "audit_log_path": "/app/data/audit.jsonl",
+  "session_context_path": "",
+  "mcp_stdio_command": "python3",
+  "mcp_stdio_args": [
+    "/opt/mcp-jarvis1net/src/server.py"
+  ],
+  "mcp_timeout_sec": 15,
+  "mcp_max_tool_rounds": 18,
+  "mcp_tool_result_max_chars": 40000,
+  "mcp_microsoft_tool_result_max_chars": 12000,
+  "mcp_chat_completion_max_tokens": 10240,
+  "display_timezone": "",
+  "jarvis_no_docker_exit_restart": false,
+  "microsoft_client_id": "",
+  "microsoft_tenant_id": "consumers",
+  "microsoft_graph_scopes": [
+    "User.Read",
+    "Mail.ReadWrite",
+    "Mail.Send",
+    "Calendars.ReadWrite",
+    "Files.ReadWrite.All"
+  ],
+  "microsoft_token_cache_path": ""
+}
