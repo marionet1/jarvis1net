@@ -329,7 +329,7 @@ def process_message(
         if not _restart_from_chat_allowed(config, chat_id_s):
             if not config.telegram_allowed_chat_ids:
                 return [
-                    "Restart from chat works only if you set allowed_chat_ids in config/telegram_config.json "
+                    "Restart from chat works only if you set TELEGRAM_ALLOWED_CHAT_IDS in .env "
                     "(then only those chats may send /restart)."
                 ]
             return ["No permission to restart from this chat."]
@@ -397,7 +397,7 @@ def process_message(
         if not _restart_from_chat_allowed(config, chat_id_s):
             if not config.telegram_allowed_chat_ids:
                 return [
-                    "Reset from chat works only if you set allowed_chat_ids in config/telegram_config.json "
+                    "Reset from chat works only if you set TELEGRAM_ALLOWED_CHAT_IDS in .env "
                     "(only those chats may send /jarvis-config-reset)."
                 ]
             return ["No permission to reset from this chat."]
