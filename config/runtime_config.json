@@ -25,7 +25,8 @@
     "Mail.ReadWrite",
     "Mail.Send",
     "Calendars.ReadWrite",
-    "Files.ReadWrite.All"
+    "Files.ReadWrite.All",
+    "Notes.Read"
   ],
   "microsoft_token_cache_path": ""
 }

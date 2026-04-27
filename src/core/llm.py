@@ -228,11 +228,46 @@ def _truncate_tool_result_for_context(text: str, max_chars: int) -> str:
 
 
 def _tool_call_signature(name: str, args: dict[str, Any]) -> str:
+    sig_args = args
+    if name.startswith("microsoft_"):
+        sig_args = {k: v for k, v in args.items() if k != "graph_access_token"}
     try:
-        payload = json.dumps(args, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        payload = json.dumps(sig_args, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     except TypeError:
-        payload = str(args)
+        payload = str(sig_args)
     return f"{name}\0{payload}"
+
+
+def _microsoft_tool_missing_token_or_auth_error(raw: str) -> bool:
+    """Do not dedupe-cache these: user may supply a token right after the first failed call."""
+    s = (raw or "").strip()
+    if not s:
+        return False
+    low = s.lower()
+    if "missing microsoft graph access token" in low:
+        return True
+    if "graphhttperror" in low and "401" in low:
+        return True
+    if not s.startswith("{"):
+        return False
+    try:
+        data = json.loads(s)
+    except json.JSONDecodeError:
+        return False
+    if not isinstance(data, dict):
+        return False
+    if data.get("mcp_isError") is True:
+        err = str(data.get("error") or "").lower()
+        if "missing microsoft graph" in err or "401" in err:
+            return True
+    if data.get("ok") is False:
+        err = str(data.get("error") or "").lower()
+        if "missing microsoft graph" in err or "401" in err:
+            return True
+    msg = str(data.get("message") or "")
+    if data.get("ready") is False and "no token" in msg.lower():
+        return True
+    return False
 
 
 def _graph_unread_messages_loose_key(name: str, args: dict[str, Any]) -> str | None:
@@ -509,20 +544,38 @@ def _chat_tool_loop(
                                 )
                             else:
                                 raw = run_mcp_tool(name, args, config)
-                                tool_result_cache[sig] = raw
+                                if not (
+                                    name.startswith("microsoft_")
+                                    and _microsoft_tool_missing_token_or_auth_error(raw)
+                                ):
+                                    tool_result_cache[sig] = raw
                                 graph_unread_soft_cache[loose] = (raw, graph_read_generation)
                         elif sig in tool_result_cache:
-                            raw = tool_result_cache[sig]
-                            dup_note = (
-                                "\n\n[_jarvis1net: identical call already ran — do not repeat. "
-                                "If data was missing (truncation), narrow $select/$top or use subfolder id from earlier childFolders.]"
-                            )
+                            cached = tool_result_cache[sig]
+                            if name.startswith("microsoft_") and _microsoft_tool_missing_token_or_auth_error(
+                                cached
+                            ):
+                                raw = run_mcp_tool(name, args, config)
+                                dup_note = ""
+                                if not _microsoft_tool_missing_token_or_auth_error(raw):
+                                    tool_result_cache[sig] = raw
+                            else:
+                                raw = cached
+                                dup_note = (
+                                    "\n\n[_jarvis1net: identical call already ran — do not repeat. "
+                                    "If data was missing (truncation), narrow $select/$top or use subfolder id from earlier childFolders.]"
+                                )
                         else:
                             raw = run_mcp_tool(name, args, config)
-                            tool_result_cache[sig] = raw
+                            if not (
+                                name.startswith("microsoft_")
+                                and _microsoft_tool_missing_token_or_auth_error(raw)
+                            ):
+                                tool_result_cache[sig] = raw
                     if cal_key is not None:
                         graph_cal_soft_cache[cal_key] = raw
-                    tool_result_cache[sig] = raw
+                    if not (name.startswith("microsoft_") and _microsoft_tool_missing_token_or_auth_error(raw)):
+                        tool_result_cache[sig] = raw
                 shrunk = _maybe_shrink_microsoft_tool_json(name, raw)
                 clipped = _truncate_tool_result_for_context(shrunk, _tool_result_char_cap(name, config))
                 if dup_note:

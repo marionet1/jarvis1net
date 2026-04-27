@@ -48,6 +48,8 @@ def run_mcp_tool(name: str, arguments: dict[str, Any], config: AgentConfig) -> s
         return json.dumps({"ok": False, "error": "MCP stdio is not configured."}, ensure_ascii=False)
     args = dict(arguments or {})
     if name.startswith("microsoft_"):
+        # Model often sends graph_access_token: null; that must not block host-injected token.
+        args.pop("graph_access_token", None)
         token = resolve_graph_access_token(config)
         if token:
             args["graph_access_token"] = token

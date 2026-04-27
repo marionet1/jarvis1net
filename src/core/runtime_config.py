@@ -21,7 +21,7 @@ from .types import AgentConfig
 _DOTENV_PATH = Path(__file__).resolve().parents[2] / ".env"
 _RUNTIME_CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "runtime_config.json"
 
-_DEFAULT_MS_SCOPES = "User.Read Mail.ReadWrite Mail.Send Calendars.ReadWrite Files.ReadWrite.All"
+_DEFAULT_MS_SCOPES = "User.Read Mail.ReadWrite Mail.Send Calendars.ReadWrite Files.ReadWrite.All Notes.Read"
 _DEFAULT_TELEGRAM_STARTUP_MESSAGE = (
     "Hi — jarvis1net restarted. "
     "Conversation memory in this chat was cleared; we can continue from a fresh context."

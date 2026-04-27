@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from collections.abc import Callable
 from pathlib import Path
@@ -87,7 +88,7 @@ def _msal_request_scopes(config: AgentConfig) -> list[str]:
     if not out:
         raise RuntimeError(
             "No Graph scopes after filtering reserved (offline_access/openid/profile). "
-            "Set e.g. User.Read Mail.ReadWrite in /microsoft-set-scopes or runtime_config.json."
+            "Set e.g. User.Read Mail.ReadWrite Notes.Read in /microsoft-set-scopes or runtime_config.json."
         )
     return out
 
@@ -138,12 +139,25 @@ def get_graph_access_token_silent(config: AgentConfig) -> str | None:
     return None
 
 
+def _normalize_graph_token(raw: str) -> str | None:
+    t = raw.strip()
+    if not t:
+        return None
+    if t.lower().startswith("bearer "):
+        t = t.split(" ", 1)[1].strip()
+    return t or None
+
+
 def resolve_graph_access_token(config: AgentConfig) -> str | None:
-    static = config.microsoft_graph_access_token.strip()
-    if static:
-        if static.lower().startswith("bearer "):
-            return static.split(" ", 1)[1].strip() or None
-        return static
+    """Prefer live env + settings file over the AgentConfig snapshot (snapshot is stale until restart)."""
+    if env_tok := _normalize_graph_token(os.getenv("MCP_GRAPH_ACCESS_TOKEN", "")):
+        return env_tok
+    rt = read_settings(config.audit_log_path)
+    rt_raw = rt.get("graph_access_token")
+    if isinstance(rt_raw, str) and (f_tok := _normalize_graph_token(rt_raw)):
+        return f_tok
+    if cfg_tok := _normalize_graph_token(config.microsoft_graph_access_token or ""):
+        return cfg_tok
     return get_graph_access_token_silent(config)
 
 
